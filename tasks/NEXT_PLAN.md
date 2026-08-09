@@ -2,368 +2,738 @@
 
 ## Milestone
 
-Resolve the remaining approved `MapCoordinateSpec.md` implementation failures
-for the CoordinateMapper / MapData / map persistence layer.
+Implement the first complete path-execution foundation for CtrlKine-AMR:
+
+1. Preserve and expose the latest successful planned path.
+2. Visualize that path in the simulator.
+3. Allow the AMR to follow the planned path through its waypoints.
+4. Integrate the behavior without moving path-planning logic into Simulator or rendering code.
+5. Add focused tests and preserve the existing 43/43 regression baseline.
 
 This is an intentionally authorized multi-phase milestone.
 
-Use subagents to divide investigation and verification work, but the main agent
-must continue through all phases of this plan before stopping unless a genuine
-specification ambiguity or unsafe repository state blocks progress.
+Use multiple subagents for parallel investigation and verification where useful.
 
-Do not stop after completing only the first subtask.
+The main agent owns architecture decisions, production-code integration, final verification, and STATUS update.
+
+Do not stop after completing only one phase unless a genuine architectural ambiguity or repository problem blocks safe progress.
 
 ---
 
-## Primary Goal
+## Current Baseline
 
-Bring the implementation covered by the approved
-`docs/specs/MapCoordinateSpec.md` into conformance with its existing
-specification tests.
+The repository currently has:
 
-The approved specification is authoritative.
+- Approved first-version A* PathPlanner behavior.
+- `PathPlannerTests.exe`: 7 PASS, 0 FAIL.
+- All current tests: 43 PASS, 0 FAIL.
+- CoordinateMapper / MapData / persistence specification conformance complete.
+- `PathPlanner` returns a complete start-to-goal path as `std::vector<GridCoord>`.
+- Grid/world conversion is provided by `CoordinateMapper`.
 
-Do not weaken the specification or change tests merely to match existing
-implementation behavior.
+Preserve this baseline.
+
+Do not change existing PathPlanner semantics unless a defect is directly demonstrated.
+
+---
+
+## Functional Goal
+
+After this milestone, the application should support this flow:
+
+```text
+Start / Goal configured
+        ↓
+Simulator requests planning
+        ↓
+PathPlanner returns PathResult
+        ↓
+Successful path is retained
+        ↓
+Path is visible in the simulator
+        ↓
+AMR follows path waypoints
+        ↓
+AMR reaches final waypoint
+        ↓
+Following stops cleanly
+```
+
+A planning failure must not begin path following.
+
+---
+
+## Required Behavior
+
+### Planning Result Ownership
+
+The application must retain the latest planning result or equivalent path-execution state at an appropriate integration layer.
+
+Requirements:
+
+- A successful plan makes its path available for visualization and following.
+- A failed plan must not leave a newly executable invalid path.
+- Replanning may replace the previously stored path.
+- PathPlanner remains responsible only for planning.
+- Rendering code must not invoke A* directly.
+- AMR must not own PathPlanner.
+
+Prefer the existing architecture and avoid introducing unnecessary global state.
+
+### Path Visualization
+
+A successful planned path must be visible in the existing SFML simulator.
+
+Visualization requirements:
+
+- Render the full path from start cell through goal cell.
+- Convert `GridCoord` through `CoordinateMapper`.
+- Draw using the existing SFML rendering pipeline.
+- The rendered path must correspond to the actual `PathResult.path`.
+- Visualization must not modify map state.
+- Visualization must not contain planning logic.
+- Visualization must disappear or be replaced when the current executable path is cleared or replaced.
+
+Choose the smallest representation that clearly communicates the path.
+
+A polyline, connected cell-center segments, or another simple existing-style representation is acceptable.
+
+Do not build a new rendering subsystem.
+
+### Path Following
+
+Implement first-version waypoint following.
+
+The AMR should follow the successful path in order.
+
+Required semantics:
+
+- Follow path cells from start to goal.
+- Convert path cells to world-space waypoint positions using `CoordinateMapper`.
+- Use cell centers as waypoint targets unless existing project semantics clearly require another position.
+- Preserve the existing AMR movement model where practical.
+- Move toward one waypoint at a time.
+- Advance to the next waypoint only after the current waypoint is considered reached.
+- Stop after the final waypoint is reached.
+- Do not skip waypoint order.
+- Do not invoke PathPlanner during movement.
+- Do not automatically replan.
+
+The implementation must tolerate an empty path safely.
+
+A single-cell path must complete without attempting invalid movement.
+
+### Execution State
+
+Use the smallest amount of state required to safely control path following.
+
+The implementation must be able to distinguish at least:
+
+```text
+not following
+following
+completed
+```
+
+This does not require a large general-purpose FSM.
+
+If the existing AMR or Simulator design already has suitable state, extend it rather than introducing a parallel state framework.
+
+Do not create an extensible FSM architecture unless the existing code clearly requires it.
+
+---
+
+## Explicit First-Version Limits
+
+This milestone does NOT include:
+
+- dynamic obstacle avoidance
+- automatic replanning
+- path smoothing
+- spline trajectories
+- acceleration profiles
+- velocity planning
+- costmaps
+- robot footprint inflation
+- collision prediction
+- heading-aware A*
+- reverse-motion planning
+- multi-robot coordination
+- work-zone traversal cost
+- localization uncertainty
+- ROS integration
+- navigation stack redesign
+
+Implement only simple path visualization and waypoint following.
 
 ---
 
 ## Required Initial Reading
 
-The main agent must first read:
+The main agent must inspect the current repository before making architecture decisions.
+
+Read:
 
 - `AGENTS.md`
 - `docs/agent/STATUS.md`
+- `docs/specs/SystemOverview.md`
+- `docs/specs/PathPlannerSpec.md`
 - `docs/specs/MapCoordinateSpec.md`
-- `include/CoordinateTypes.hpp`
-- `include/MapData.hpp`
-- `src/MapData.cpp`
-- `tests/CoordinateMapperTests.cpp`
-- `tests/MapDataTests.cpp`
-- `tests/MapDataFileTests.cpp`
-- `tests/TestSupport.hpp`
-- `Makefile`
 
-Do not spend time reading unrelated documentation.
+Then inspect the relevant current implementation, including the actual files responsible for:
 
-Do not read or update:
+- Simulator lifecycle
+- input handling
+- update loop
+- render loop
+- planning requests
+- PathPlanner
+- PathResult
+- AMR position and movement
+- Environment rendering
+- CoordinateMapper
+- current tests
+- Makefile
+
+Use repository search to find exact files and symbols when needed.
+
+Do not read unrelated documentation.
+
+Do not update:
 
 - `README.md`
 - `Document.md`
 - `docs/specs/README.md`
-
-unless required to understand a compiler error caused by this task.
-
----
-
-# Phase 1 — Baseline
-
-Before modifying production code:
-
-1. Run the relevant existing test executables or `mingw32-make test`.
-2. Capture the currently failing specification cases.
-3. Group failures by specification requirement.
-4. Distinguish failures belonging to:
-   - CoordinateMapper
-   - MapData runtime behavior
-   - MapData save/load behavior
-
-Do not modify code during baseline collection.
-
-The purpose is to establish the exact failure set before implementation changes.
+- `AGENTS.md`
 
 ---
 
-# Phase 2 — Parallel Investigation
+## Phase 1 — Baseline Verification
 
-Use subagents for investigation.
+Before production changes:
 
-Subagents are primarily read-only investigators. They must not independently
-make overlapping production-code changes.
+1. Run a clean build.
+2. Run the current test suite.
+3. Confirm the expected baseline:
+   - 43 PASS
+   - 0 FAIL
+4. Inspect the current runtime ownership of:
+   - current AMR pose
+   - planning request
+   - PathResult
+   - update loop
+   - rendering
 
-The main agent owns final implementation decisions and production-code edits.
+If the baseline differs from the current `STATUS.md`, investigate before proceeding.
 
-## Subagent A — CoordinateMapper
+Do not modify production code during baseline verification.
 
-Investigate all failing CoordinateMapper-related cases.
+---
 
-Focus on:
+## Phase 2 — Parallel Investigation
 
-- grid-resolution invariants
-- world-to-grid conversion
-- grid-to-world conversion
-- snapping behavior
-- any other failing `COORD-*` requirement
+Use subagents for focused investigation.
 
-Compare:
+Subagents should primarily inspect and report.
 
-- approved specification
-- tests
-- current implementation
+Avoid concurrent edits to overlapping production files.
 
-Return to the main agent:
+The main agent remains the single integration writer.
 
-- failing spec IDs
-- root cause for each failure
-- exact production location responsible
-- smallest correct fix
+### Subagent A — Planning and Simulator Integration
+
+Investigate the current planning flow.
+
+Determine:
+
+- where `PathPlanner` is instantiated or called
+- where `PathResult` currently exists
+- whether the result is discarded after planning
+- which object should own the current executable path
+- how planning success/failure is currently surfaced
+- how replanning should replace path state
+- which existing Simulator methods are natural integration points
+
+Return:
+
+- relevant files and symbols
+- current call flow
+- recommended ownership of active path state
+- smallest integration change
+- risks of coupling PathPlanner to Simulator or rendering
+
+Do not edit production code.
+
+### Subagent B — AMR Movement
+
+Investigate the current AMR implementation.
+
+Determine:
+
+- how AMR world position is stored
+- how heading is stored
+- how movement currently occurs
+- whether movement is frame-time based
+- existing movement speed semantics
+- current update API
+- current keyboard/manual movement behavior
+- whether path following can reuse existing movement primitives
+- potential conflicts between manual control and autonomous following
+
+Return:
+
+- relevant files and symbols
+- current movement model
+- recommended waypoint-following integration
+- minimum new state required
+- edge cases
 - regression risks
 
 Do not edit production code.
 
----
+### Subagent C — Rendering and Coordinate Conversion
 
-## Subagent B — MapData Runtime
+Investigate current rendering and coordinate conventions.
 
-Investigate failing MapData runtime behavior excluding file persistence.
+Determine:
 
-Focus on:
-
-- world-boundary containment
-- obstacle insertion/removal
-- GridCoord/world-position behavior
-- work zones
-- start/goal pose state
-- clear/reset behavior
-- grid-resolution interaction
-- any other failing runtime `MAP-*` requirement
+- where map and AMR rendering occur
+- the best existing render layer for path visualization
+- how `CoordinateMapper::gridToWorldCenter()` or equivalent should be used
+- whether rendering should live in Simulator, Environment, or an existing rendering helper
+- how to draw the path without modifying persistent map state
 
 Return:
 
-- failing spec IDs
-- root cause
-- production location
-- smallest correct fix
-- interactions with PathPlanner or editor behavior that must remain unchanged
+- relevant files and symbols
+- recommended rendering ownership
+- proposed minimal rendering implementation
+- coordinate assumptions
+- regression risks
+
+Do not edit production code.
+
+### Subagent D — Test Strategy
+
+Inspect existing tests and identify the smallest useful test coverage for this milestone.
+
+Determine how to verify:
+
+- successful path retention
+- failed plan does not begin execution
+- waypoint ordering
+- single-cell path behavior
+- empty path safety
+- completion at final waypoint
+- replanning/path replacement
+- any separable path-execution state logic
+
+Prefer deterministic unit tests over UI/render screenshot tests.
+
+Return:
+
+- existing test infrastructure that can be reused
+- recommended test boundaries
+- production seams needed for testability, if any
+- cases that should remain integration-only
 
 Do not edit production code.
 
 ---
 
-## Subagent C — Map Persistence
+## Phase 3 — Main-Agent Architecture Decision
 
-Investigate failing `MapData` save/load specification behavior.
-
-Focus on:
-
-- serialization
-- deserialization
-- malformed input
-- required records
-- invalid values
-- atomic load behavior
-- preservation of existing state on failed load
-- any failing persistence-related `MAP-*` requirement
-
-Return:
-
-- failing spec IDs
-- root cause
-- production location
-- smallest correct fix
-- edge cases that require targeted verification
-
-Do not edit production code.
-
----
-
-# Phase 3 — Main-Agent Triage
-
-After all investigation subagents report:
+After receiving the subagent findings:
 
 1. Consolidate findings.
-2. Remove duplicates.
-3. Confirm every proposed change against `MapCoordinateSpec.md`.
-4. Identify dependencies between fixes.
-5. Apply fixes in the smallest safe order.
+2. Inspect all proposed integration locations directly.
+3. Choose the smallest architecture consistent with existing repository ownership.
+4. Avoid duplicate state ownership.
+5. Avoid introducing abstractions only for future possibilities.
 
-Do not fix behavior that already conforms to the approved specification.
+Preserve these architectural rules:
 
-Do not rewrite working code for style.
+```text
+PathPlanner
+    owns planning algorithm
 
-Do not introduce new abstractions unless required for correctness.
+MapData
+    owns persistent map state
 
-Prefer local invariant fixes over duplicated caller-side validation.
+CoordinateMapper
+    owns grid/world conversion
 
-Example:
+Simulator
+    coordinates application flow
 
-If `CoordinateMapper` itself can guarantee a resolution invariant, prefer fixing
-the invariant there instead of adding the same validation to every caller.
+AMR
+    owns robot movement/state that naturally belongs to the robot
 
----
+Rendering
+    displays state but does not decide routes
+```
 
-# Phase 4 — Implementation
+If the existing code strongly supports a slightly different ownership boundary, follow the existing architecture and explain the decision in STATUS.
 
-The main agent performs production-code edits.
+Do not move A* logic into Simulator.
 
-For each independent failure group:
-
-1. Make the smallest implementation change.
-2. Build if necessary.
-3. Run the directly relevant tests.
-4. Confirm the targeted specification failures are resolved.
-5. Continue to the next confirmed failure group.
-
-Do not batch unrelated speculative changes.
-
-Production changes are allowed only when supported by:
-
-1. Approved specification
-2. Existing specification tests
-3. Verified root cause
+Do not move rendering logic into PathPlanner.
 
 ---
 
-# Phase 5 — Test Discipline
+## Phase 4 — Implement Active Path Integration
 
-Existing specification tests are authoritative evidence.
+Implement the smallest path-state integration required.
 
-Do not:
+The application must be able to represent the current planned path and its execution progress.
 
-- delete failing tests
-- skip failing tests
-- weaken assertions
-- change expected values to fit current implementation
-- relabel a failure as intentional without specification evidence
+Prefer a compact structure such as:
 
-Tests may only be modified if the test itself is demonstrably inconsistent
-with the approved specification.
+```text
+active path
+current waypoint index
+following state
+```
 
-If such a case is discovered:
+Do not create a large navigation framework.
 
-- do not silently change the test
-- report the conflict clearly
-- leave it unresolved unless the specification makes the correct behavior
-  unambiguous
+Required behavior:
 
-Add new tests only when needed to prevent regression for a production fix that
-is not adequately covered by existing tests.
+- successful plan installs/replaces active path
+- failed plan does not start following
+- active path can be cleared
+- waypoint index is reset when a new path is installed
+- invalid indexing is impossible
+- single-cell and empty paths are handled safely
 
-Do not create redundant test cases simply to increase coverage count.
+After this phase:
+
+- build
+- run directly relevant tests
+
+Do not proceed with unresolved regressions.
 
 ---
 
-# Phase 6 — Regression Verification
+## Phase 5 — Implement Path Visualization
 
-After all justified fixes:
+Render the active successful path.
+
+Requirements:
+
+- use actual active path data
+- convert path cells through CoordinateMapper
+- render in the normal frame render path
+- do not mutate MapData
+- do not call PathPlanner from rendering
+- keep rendering implementation simple
+- avoid unnecessary allocations every frame when easily avoidable
+
+The visualization must accurately update when the active path changes.
+
+After this phase:
+
+- build
+- verify no compile/runtime integration problems
+- run relevant automated tests
+
+Do not add image-based UI tests unless existing infrastructure already supports them.
+
+---
+
+## Phase 6 — Implement Waypoint Following
+
+Implement first-version automatic path following.
+
+For each update:
+
+1. If not following, do nothing.
+2. Resolve the current waypoint.
+3. Convert it to its world-space target.
+4. Move the AMR toward the target using the existing movement model or the smallest compatible extension.
+5. Detect waypoint arrival using a stable tolerance appropriate to existing movement units.
+6. Advance the waypoint index.
+7. Stop cleanly after the final waypoint.
+
+Important constraints:
+
+- movement must remain frame-rate independent if the existing AMR movement is frame-time based
+- do not teleport between normal waypoints
+- do not overshoot indefinitely
+- avoid oscillation around waypoint centers
+- never access a waypoint beyond the path bounds
+- preserve manual movement behavior unless the task requires an explicit interaction rule
+
+If manual and automatic movement conflict, implement the smallest deterministic rule.
+
+Prefer:
+
+```text
+active path following owns movement while following
+manual controls remain unchanged while not following
+```
+
+Do not redesign the input system.
+
+---
+
+## Phase 7 — Automated Tests
+
+Add focused tests where the architecture allows deterministic testing.
+
+At minimum, cover the separable logic for:
+
+- empty path safety
+- single-cell path completion
+- waypoint progression
+- final completion state
+- path replacement resets progress
+- failed/invalid execution input does not begin following
+
+If movement logic is testable without SFML window creation, test it directly.
+
+If rendering itself cannot be meaningfully unit-tested with current infrastructure, verify rendering through build/integration and keep rendering logic minimal.
+
+Do not add brittle screenshot tests.
+
+Do not weaken any existing tests.
+
+---
+
+## Phase 8 — Regression Verification
+
+Perform a clean verification.
 
 Run:
 
-- `mingw32-make all`
-- `mingw32-make test`
+```text
+mingw32-make clean
+mingw32-make all
+mingw32-make test
+```
 
-Also confirm specifically:
+Also run relevant new test executables directly if added.
 
-- `CoordinateMapperTests.exe`
-- `MapDataTests.exe`
-- `MapDataFileTests.exe`
-- `PathPlannerTests.exe`
+Verify the existing suites still pass:
 
-PathPlanner must remain:
+```text
+CoordinateMapperTests.exe
+MapDataTests.exe
+MapDataFileTests.exe
+PathPlannerTests.exe
+```
 
-- 7 PASS
-- 0 FAIL
+Existing baseline must remain:
 
-unless the repository now contains additional valid PathPlanner tests.
+```text
+43 PASS
+0 FAIL
+```
 
-Any new regression caused by this milestone must be fixed before completion.
+plus any newly added passing tests.
 
----
-
-# Phase 7 — Completion Gate
-
-The milestone is complete only if:
-
-- all resolvable `MapCoordinateSpec.md` failures have been addressed
-- relevant production code matches the approved specification
-- targeted tests pass
-- no previously passing relevant test regressed
-- PathPlanner tests still pass
-- the project builds successfully
-
-If some specification failures remain:
-
-Do not guess.
-
-For every remaining failure, report one of:
-
-- specification ambiguity
-- test/spec conflict
-- blocked by an out-of-scope architectural issue
-- unresolved implementation defect
-
-Include the exact spec ID.
+PathPlanner must retain its approved first-version behavior.
 
 ---
 
-# STATUS Update
+## Phase 9 — Runtime Sanity Check
+
+If the repository can be safely run in the current environment without requiring unavailable external services:
+
+Perform a minimal manual/runtime sanity check.
+
+Verify:
+
+```text
+plan succeeds
+→ path becomes visible
+→ following begins
+→ AMR progresses through path
+→ AMR reaches final waypoint
+→ following stops
+```
+
+Also verify a planning failure does not begin following.
+
+Do not spend excessive time automating GUI validation.
+
+If runtime execution is unavailable or inappropriate, report that clearly and rely on build/tests.
+
+---
+
+## Completion Gate
+
+The milestone is complete only when:
+
+- successful planning creates a usable active path
+- the active path is visible
+- AMR can follow it in waypoint order
+- final waypoint completion stops execution cleanly
+- empty/single-cell paths are safe
+- failed planning does not trigger following
+- existing A* behavior is unchanged
+- build passes
+- all previous tests pass
+- new relevant tests pass
+- no unrelated architecture was modified
+
+If any item cannot be completed safely, identify the exact blocker.
+
+Do not silently omit a milestone requirement.
+
+---
+
+## Change Discipline
+
+Modify only files necessary for this milestone.
+
+Production changes may include the existing classes responsible for:
+
+- Simulator coordination
+- AMR movement
+- path execution state
+- rendering integration
+
+and narrowly scoped new source/header files if they materially improve ownership or testability.
+
+Do not create a new abstraction merely to distribute code across more files.
+
+Prefer extending an appropriate existing class when responsibility already belongs there.
+
+---
+
+## Test Discipline
+
+Do not:
+
+- remove existing tests
+- skip tests
+- weaken assertions
+- change approved specification behavior
+- alter test expectations merely to make implementation pass
+
+Add tests only for behavior introduced by this milestone.
+
+---
+
+## Explicit Out of Scope
+
+Do not modify:
+
+- `AGENTS.md`
+- `README.md`
+- `Document.md`
+- `docs/specs/README.md`
+
+Do not implement:
+
+- automatic replanning
+- dynamic obstacle response
+- costmaps
+- path smoothing
+- advanced trajectory control
+- generalized navigation FSM
+- multi-AMR coordination
+- new map-file format
+- new PathPlanner algorithm
+- unrelated UI features
+- unrelated refactors
+- build-system improvements such as Makefile dependency tracking
+
+The known Makefile header-dependency limitation belongs to a separate milestone.
+
+---
+
+## Multi-Agent Rules
+
+Use subagents where parallel investigation provides real value.
+
+Recommended initial delegation:
+
+```text
+Main Sol Agent
+├── Explorer A: planning / Simulator integration
+├── Explorer B: AMR movement
+├── Explorer C: rendering / coordinates
+└── Explorer D: test strategy
+```
+
+Subagents are investigators unless the main agent explicitly delegates an isolated non-overlapping test task.
+
+Do not allow multiple agents to concurrently edit the same production area.
+
+The main agent is responsible for:
+
+```text
+architecture synthesis
+production implementation
+integration decisions
+regression handling
+final verification
+STATUS update
+```
+
+Subagent findings are advisory.
+
+The main agent must verify important findings against actual repository code before implementation.
+
+---
+
+## Long-Running Task Rules
+
+This plan intentionally authorizes multiple sequential implementation phases.
+
+Do not stop after:
+
+- investigation
+- visualization only
+- state creation only
+- one passing targeted test
+
+Continue until the Completion Gate is satisfied or a genuine blocker is found.
+
+After each implementation phase:
+
+```text
+change
+→ build/test
+→ verify
+→ continue
+```
+
+If a proposed design causes increasing complexity, stop that direction and choose the smallest implementation satisfying the explicit requirements.
+
+Do not expand scope to consume remaining token budget.
+
+Correctness and integration quality take priority over maximum code volume.
+
+---
+
+## STATUS Update
 
 Update only:
 
 `docs/agent/STATUS.md`
 
-Keep it concise.
+Replace stale milestone information with the current repository state.
 
-Record:
+Record concisely:
 
-- milestone result
-- specification behaviors fixed
-- verification results
-- remaining failures, if any
-- next smallest engineering milestone
-- important implementation decisions only when needed
+- current milestone
+- implemented path-execution behavior
+- ownership decisions
+- verification performed
+- total test result
+- known limitations
+- next smallest meaningful milestone
 
-Do not turn STATUS into a chronological log.
+Do not turn STATUS into a development log.
 
----
-
-# Explicit Out of Scope
-
-Do not modify:
-
-- `README.md`
-- `Document.md`
-- `docs/specs/README.md`
-- `AGENTS.md`
-- UI behavior
-- rendering
-- Simulator architecture
-- PathPlanner algorithm behavior
-- AMR movement behavior
-
-Do not:
-
-- add dependencies
-- perform broad refactors
-- redesign the project architecture
-- implement the next navigation milestone
-- add path visualization
-- add robot path following
+Do not update unrelated documentation.
 
 ---
 
-# Multi-Agent Rules
-
-Use subagents for parallel investigation where useful.
-
-Recommended structure:
-
-- Explorer A: CoordinateMapper
-- Explorer B: MapData runtime
-- Explorer C: persistence / file loading
-
-Subagents must not concurrently edit overlapping production files.
-
-The main agent is the single writer for production-code integration.
-
-Subagent findings are advisory.
-
-The main agent must independently verify findings against the approved
-specification before changing code.
-
----
-
-# Git Ownership
+## Git Ownership
 
 For this orchestrated run:
 
@@ -371,24 +741,27 @@ For this orchestrated run:
 - Do NOT run `git commit`
 - Do NOT run `git push`
 
-This task-specific rule overrides repository handoff instructions that assign
-Git finalization to Codex.
+This task-specific rule overrides any repository instruction assigning Git finalization to Codex.
 
 The external orchestrator owns Git finalization after Codex exits successfully.
 
+Before returning control to the orchestrator, ensure all intended repository modifications are present in the working tree.
+
 ---
 
-# Final Report
+## Final Report
 
-Before STOP, report only:
+Before STOP, report:
 
-1. Production files modified
+1. Production files modified or added
 2. Tests modified or added
-3. Specification failures fixed
-4. Verification results
-5. Remaining failures and their spec IDs
-6. Any blocking ambiguity
+3. Path execution architecture implemented
+4. Visualization behavior implemented
+5. Path-following behavior implemented
+6. Verification commands and results
+7. Total PASS / FAIL count
+8. Remaining limitations or blockers
 
-Do not produce a long tutorial or documentation summary.
+Do not produce a tutorial.
 
 After the final report, STOP.
