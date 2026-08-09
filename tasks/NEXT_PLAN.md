@@ -2,157 +2,197 @@
 
 ## Milestone
 
-Implement the next navigation-quality milestone for CtrlKine-AMR:
+Fix the unplanned approach-to-Start behavior in CtrlKine-AMR.
 
-1. Diagnose and fix the observed Start/Goal placement-range problem without weakening approved map-boundary semantics.
-2. Make path planning aware of AMR body clearance so planned routes are physically traversable by the current robot footprint.
-3. Reduce unnecessary grid-by-grid waypoint corners where it is safe to do so.
-4. Improve automatic path-following motion so heading changes are progressive rather than instantaneous.
-5. Preserve all existing approved behavior and the current 54 PASS / 0 FAIL baseline.
+The current runtime can plan a valid Start-to-Goal route, but if the AMR's current pose differs from the configured Start Pose, execution first drives directly toward the first Start-cell waypoint without path planning. That unplanned approach can cross obstacles and collide before the robot ever reaches the planned path.
 
-This is an intentionally authorized long-running multi-phase milestone.
+This milestone must make Start Pose and AMR runtime pose semantics consistent so execution begins from the configured Start Pose and every normal autonomous movement after planning belongs to the planned route.
 
-Use subagents for parallel investigation and verification.
+This is a focused correctness milestone.
 
-The main agent owns architecture decisions, production-code integration, final regression verification, and `docs/agent/STATUS.md`.
-
-Do not stop after completing only one subtask unless a genuine specification ambiguity, repository inconsistency, or unsafe design dependency blocks further work.
-
----
-
-## Observed Runtime Problems
-
-The current interactive desktop run exposed three concrete problems:
-
-### Problem A — Start/Goal Placement Range
-
-When placing a Goal, positions that visually appear to be part of the usable editor area can become impossible to place beyond a certain region.
-
-This may be:
-
-- correct `MapData` world-boundary enforcement with unclear visualization,
-- a mismatch between displayed grid extent and editable map extent,
-- a coordinate/viewport conversion problem,
-- or an actual placement-validation defect.
-
-Do not assume which explanation is correct.
-
-Investigate first.
-
-Do not weaken approved `MapCoordinateSpec.md` boundary behavior merely to allow placement farther away.
-
-### Problem B — Rigid Path Following
-
-Current automatic motion follows discrete cell-center waypoints and can change heading abruptly at grid corners.
-
-Observed behavior feels mechanically rigid.
-
-Improve motion quality while preserving deterministic, safe waypoint execution.
-
-Do not build a full trajectory-planning stack.
-
-### Problem C — Planner Ignores Robot Footprint
-
-The current A* planner reasons about cell-center occupancy.
-
-A route may therefore be valid for a point but invalid for the physical AMR body.
-
-Observed result:
-
-```text
-PathPlanner: route is free
-Runtime AMR collision: body hits obstacle
-```
-
-This is the highest-priority correctness issue in this milestone.
+Do not expand it into another navigation-quality redesign.
 
 ---
 
 ## Current Baseline
 
-The repository currently has:
+Current repository state:
 
-- First-version A* planning complete.
-- `PathExecution` retaining successful paths and waypoint state.
-- Path visualization integrated in Simulator.
-- Automatic waypoint following integrated.
-- Runtime collision checks.
-- `CoordinateMapper`, `MapData`, and persistence specification conformance complete.
-- Existing full test suite: 54 PASS, 0 FAIL.
+- Navigation-quality milestone complete.
+- Clearance-aware runtime planning implemented.
+- Conservative AMR body clearance implemented.
+- Collinear execution-waypoint compression implemented.
+- Progressive automatic turning implemented.
+- Grid rendering clipped to the actual world boundary.
+- Current automated baseline: 70 PASS, 0 FAIL.
 
-Current suites:
+Existing suites:
 
 ```text
 CoordinateMapperTests.exe   6 PASS
-MapDataTests.exe           15 PASS
+MapDataTests.exe           16 PASS
 MapDataFileTests.exe       15 PASS
-PathPlannerTests.exe        7 PASS
-PathExecutionTests.exe     11 PASS
+PathPlannerTests.exe       14 PASS
+PathExecutionTests.exe     19 PASS
 ```
 
-Preserve this baseline.
+Preserve the entire baseline.
 
 ---
 
-## Priority Order
+## Confirmed Runtime Problem
 
-Implement in this order unless investigation proves a dependency requires a different safe order:
+Observed interactive behavior:
 
 ```text
-1. Footprint-aware planning correctness
-2. Start/Goal placement-range diagnosis and fix
-3. Safe path simplification
-4. Progressive motion / turning quality
-5. Full regression and desktop sanity verification
+AMR current pose
+      ↓
+direct moveToward()
+      ↓
+configured Start waypoint
+      ↓
+planned Start → Goal path
 ```
 
-Correctness takes priority over visual smoothness.
+The first segment from the AMR's current pose to the configured Start Pose is not generated by PathPlanner.
+
+Therefore:
+
+- it can cross obstacles,
+- it can violate planner clearance,
+- it can collide before reaching the planned path,
+- Path Planning can report success while execution still fails before entering that path.
+
+The repository STATUS already identifies this limitation.
+
+This milestone removes that semantic mismatch.
+
+---
+
+## Intended First-Version Semantics
+
+For this simulator, configured Start Pose represents the AMR's simulation starting pose.
+
+Required behavior:
+
+```text
+Set Start Pose
+      ↓
+AMR runtime pose becomes Start Pose
+      ↓
+Set Goal Pose
+      ↓
+Enter / Plan
+      ↓
+PathPlanner plans from Start Pose
+      ↓
+PathExecution begins from that same Start Pose
+      ↓
+AMR follows only the planned route
+```
+
+There must be no implicit autonomous "approach Start" segment.
+
+---
+
+## Required Behavior
+
+### Start Pose Synchronization
+
+When a valid Start Pose is created or changed through the editor:
+
+- AMR world position must synchronize to the Start Pose position.
+- AMR heading must synchronize to the Start Pose heading.
+- existing active path execution must be cleared because its starting assumptions are stale.
+- validation must be refreshed.
+- the AMR must visually appear at the newly configured Start Pose immediately or by the next normal frame update.
+
+Do not require the user to press Enter before this synchronization occurs.
+
+### Planning
+
+When planning is requested:
+
+- the AMR should already represent the configured Start Pose.
+- the planner must continue to use MapData Start Pose as the planning start.
+- clearance-aware planning behavior must remain unchanged.
+- PathPlanner must not be modified unless investigation finds a direct dependency.
+
+### Execution
+
+After successful planning:
+
+- execution must start from the planned Start location.
+- no direct unplanned movement to the first Start waypoint may occur.
+- the first waypoint may still exist in `PathResult.path` and/or execution waypoints as required by existing path semantics.
+- execution logic must safely recognize that the robot is already at the starting waypoint and advance normally.
+- no waypoint may be consumed because of a collision rollback.
+
+### Start Pose Editing
+
+If Start Pose is moved after a route has already been planned:
+
+- clear the old executable route and visualization,
+- move the AMR to the new Start Pose,
+- require a new planning request before autonomous following resumes.
+
+### Start Pose Heading Editing
+
+If existing editor behavior allows Start heading rotation:
+
+- updating Start Pose heading must synchronize AMR heading as well.
+- do not change Goal heading semantics in this milestone.
+
+### Reset Behavior
+
+Investigate the existing robot-reset behavior and make it semantically consistent.
+
+Preferred rule:
+
+- if a valid Start Pose exists, resetting the robot should reset it to Start Pose,
+- otherwise reset to the existing default robot pose.
+
+Do not silently remove existing reset functionality.
 
 ---
 
 ## Architectural Constraints
 
-Preserve the current responsibility boundaries:
+Preserve current responsibilities:
 
 ```text
-PathPlanner
-    owns path-search behavior
-
 MapData
-    owns persistent map state
-
-CoordinateMapper
-    owns grid/world conversion
+    owns configured Start / Goal poses
 
 Simulator
-    coordinates planning, execution, rendering, and input flow
-
-PathExecution
-    owns active transient path and execution progress
+    coordinates editor changes, AMR synchronization, planning, execution
 
 AMR
-    owns robot pose and movement primitives
+    owns runtime robot pose and movement
 
-Environment
-    owns editor interaction and map visualization
+PathPlanner
+    owns path search
+
+PathExecution
+    owns transient execution state
 ```
 
 Do not:
 
-- move A* logic into Simulator,
+- move configured Start Pose ownership into AMR,
+- make MapData depend on AMR,
 - make AMR depend on PathPlanner,
-- put persistent navigation state into MapData,
-- make rendering decide route validity,
-- create global navigation state,
-- redesign the project architecture.
+- add another persistent start-pose copy,
+- add a new navigation subsystem,
+- redesign the editor.
 
-Use the smallest extension consistent with existing ownership.
+The synchronization should occur at the integration layer that already knows both MapData and AMR.
 
 ---
 
 ## Required Initial Reading
 
-The main agent must first read:
+The main agent must read:
 
 - `AGENTS.md`
 - `docs/agent/STATUS.md`
@@ -162,21 +202,18 @@ The main agent must first read:
 
 Then inspect the current implementation responsible for:
 
-- Simulator event handling and update loop
-- Start/Goal placement
-- viewport-to-world coordinate conversion
-- world-boundary rendering
-- MapData pose validation
-- PathPlanner blocked-cell logic
-- AMR geometry/configuration
-- AMR collision checking
-- PathExecution
-- path visualization
-- automatic path following
-- existing tests
+- Simulator editor event handling
+- Start Pose placement
+- Start Pose selection/editing
+- Start Pose heading rotation
+- robot reset
+- planning request
+- PathExecution installation and clearing
+- AMR pose setters or reconstruction behavior
+- validation refresh
+- path visualization clearing
+- relevant tests
 - Makefile
-
-Use repository search to locate exact files and symbols.
 
 Do not read unrelated documentation.
 
@@ -189,398 +226,11 @@ Do not modify:
 
 ---
 
-# Phase 1 — Clean Baseline
+# Phase 1 — Baseline Verification
 
-Before production edits:
+Before editing production code:
 
 1. Run:
-   - `mingw32-make clean`
-   - `mingw32-make all`
-   - `mingw32-make test`
-2. Confirm:
-   - 54 PASS
-   - 0 FAIL
-3. Record the current relevant runtime flow:
-   - editor click → world position
-   - pose placement → MapData
-   - PathPlanner → PathResult
-   - PathExecution → current waypoint
-   - AMR movement → collision acceptance/rollback
-
-If baseline tests do not match `STATUS.md`, investigate before implementation.
-
----
-
-# Phase 2 — Parallel Investigation
-
-Use subagents as read-only investigators unless the main agent explicitly delegates an isolated non-overlapping test task.
-
-Do not allow concurrent production edits.
-
----
-
-## Subagent A — Start/Goal Placement and World Boundary
-
-Investigate the observed placement-range problem.
-
-Determine:
-
-- how mouse pixel coordinates become simulation world coordinates,
-- how the simulation viewport and camera affect that conversion,
-- how the world boundary is defined,
-- how the boundary is rendered,
-- how Start and Goal setters validate positions,
-- whether the displayed grid extends outside the editable world,
-- whether Start and Goal have identical placement semantics,
-- whether the observed restriction is correct behavior, misleading UX, or a defect.
-
-Compare behavior against `MapCoordinateSpec.md`.
-
-Return:
-
-- exact files and symbols,
-- root cause,
-- whether approved spec behavior is currently violated,
-- smallest correct fix,
-- any required UI/boundary-visualization adjustment,
-- tests that should be added or updated,
-- regression risks.
-
-Do not edit production code.
-
----
-
-## Subagent B — Footprint-Aware Planning
-
-Investigate how to make A* routes physically traversable for the current AMR.
-
-Inspect:
-
-- `AMRConfig`,
-- body length/width,
-- current collision geometry,
-- grid resolution,
-- PathPlanner blocked-cell logic,
-- obstacle representation,
-- world boundary semantics.
-
-Evaluate a first-version configuration-space approach based on obstacle/boundary inflation.
-
-Preferred design direction:
-
-```text
-physical obstacle / boundary
-        ↓
-inflate by robot clearance
-        ↓
-planner evaluates AMR-center positions
-        ↓
-existing A* remains largely unchanged
-```
-
-The first version should use a conservative clearance representation.
-
-Do not implement orientation-dependent footprint search unless required by the current architecture.
-
-Return:
-
-- exact current body/collision dimensions,
-- recommended clearance model,
-- where inflation/traversability should be calculated,
-- whether inflation should be precomputed or queried,
-- boundary-clearance handling,
-- expected behavior for narrow passages,
-- smallest implementation change,
-- required tests,
-- regression risks.
-
-Do not edit production code.
-
----
-
-## Subagent C — Path Simplification
-
-Investigate whether the raw grid path can be safely simplified before execution.
-
-Goal:
-
-Reduce unnecessary waypoint-by-waypoint turning while preserving collision safety.
-
-Evaluate a minimal approach such as:
-
-- removing collinear intermediate cells,
-- or line-of-sight waypoint compression only if collision/clearance checks can prove the segment safe.
-
-Do not blindly connect distant waypoints.
-
-Any simplified segment must remain valid for the same footprint-aware traversability model used by planning.
-
-Return:
-
-- current raw path characteristics,
-- recommended first-version simplification rule,
-- exact safety predicate needed,
-- ownership location,
-- tests,
-- cases where simplification must not occur,
-- regression risks.
-
-Do not edit production code.
-
----
-
-## Subagent D — Motion Controller
-
-Investigate current AMR automatic movement and differential-drive behavior.
-
-Determine:
-
-- how manual `AMR::update(dt, vL, vR)` works,
-- how current automatic `moveToward()` changes heading,
-- current speed units,
-- current collision rollback semantics,
-- current arrival tolerance,
-- how to make turns progressive without introducing a full trajectory planner.
-
-Preferred behavior:
-
-```text
-current heading
-    ↓
-compute target heading
-    ↓
-limit heading change by dt
-    ↓
-move forward only as appropriate
-    ↓
-approach waypoint
-```
-
-If the existing differential-drive model can be reused cleanly, prefer that over directly assigning heading.
-
-Return:
-
-- exact movement model,
-- recommended first-version automatic controller,
-- required new parameters/constants,
-- behavior near sharp corners,
-- behavior near final waypoint,
-- interaction with collision rollback,
-- deterministic test strategy,
-- regression risks.
-
-Do not edit production code.
-
----
-
-# Phase 3 — Main-Agent Design Synthesis
-
-After all subagents report:
-
-1. Consolidate findings.
-2. Verify important claims directly against repository code.
-3. Resolve overlaps between footprint planning, simplification, and motion.
-4. Choose the smallest architecture satisfying the milestone.
-5. Preserve approved specification behavior.
-6. Define one consistent traversability predicate for planning and any line-of-sight simplification.
-
-Do not create separate inconsistent definitions of "safe cell" in multiple modules.
-
-If a new narrowly scoped helper/class materially prevents duplicated safety logic, it is allowed.
-
-Do not introduce a generalized navigation framework.
-
----
-
-# Phase 4 — Footprint-Aware Traversability
-
-Implement the highest-priority correctness fix first.
-
-## Required Behavior
-
-A planner-valid route must provide enough clearance for the current AMR body under the first-version conservative footprint model.
-
-At minimum:
-
-- obstacle-adjacent cells that cannot safely contain the AMR center must be blocked for planning,
-- world-boundary clearance must also account for AMR body size,
-- start and goal must fail planning if they are not footprint-valid,
-- narrow passages smaller than required robot clearance must not be considered traversable,
-- existing four-neighbor A* semantics remain otherwise unchanged.
-
-Prefer configuration-space inflation or an equivalent conservative center-validity test.
-
-Do not mutate persistent obstacles merely to create planner inflation.
-
-Do not write inflated obstacles back to map files.
-
-The physical map remains authoritative; inflated occupancy is derived planning data.
-
-## Robot Footprint
-
-Use the actual configured AMR geometry.
-
-If an orientation-independent first-version approximation is required, use a conservative footprint radius/half-extent derived from current AMR dimensions and document that decision in STATUS.
-
-Do not invent arbitrary clearance unless required as a small explicit safety margin.
-
-If a safety margin is introduced, make it a clearly named constant or configuration value.
-
-## Verification Gate
-
-After implementation:
-
-- build,
-- run PathPlanner tests,
-- add focused footprint tests,
-- run PathExecution tests,
-- confirm existing behavior has not regressed.
-
-Do not proceed with a known correctness regression.
-
----
-
-# Phase 5 — Start/Goal Placement Fix
-
-Implement only the root-cause fix found by Subagent A.
-
-Possible acceptable outcomes include:
-
-### Case 1 — Existing boundary semantics are correct
-
-If the editor visually shows space outside the editable world:
-
-- keep MapData validation unchanged,
-- improve the visual/editor behavior so the usable region is unambiguous.
-
-### Case 2 — Coordinate conversion is wrong
-
-Fix pixel/view/world conversion at the correct integration layer.
-
-### Case 3 — Pose validation is inconsistent with approved spec
-
-Fix the minimum validation defect required by `MapCoordinateSpec.md`.
-
-Do not enlarge the world boundary implicitly as a workaround.
-
-Do not make Start/Goal placement bypass MapData invariants.
-
-Add targeted regression tests where practical.
-
----
-
-# Phase 6 — Safe Path Simplification
-
-Implement the smallest safe path simplification supported by investigation.
-
-Minimum acceptable first version:
-
-- remove redundant collinear intermediate waypoints.
-
-If robust footprint-aware line-of-sight checking is simple and clearly safe, it may also compress multiple grid segments into longer straight segments.
-
-Any line-of-sight compression must:
-
-- use the same effective clearance model as planning,
-- reject segments that cross or graze invalid clearance space,
-- preserve start and goal,
-- preserve path order,
-- never create a less safe route than the raw A* path.
-
-Do not implement splines or curve generation in this phase.
-
-Keep the original `PathPlanner` result semantics clear.
-
-If simplification is execution-only, do not silently redefine `PathResult.path` unless architecture strongly supports that choice.
-
-Prefer retaining the raw planner result and deriving an execution waypoint sequence if needed.
-
----
-
-# Phase 7 — Progressive Automatic Motion
-
-Improve automatic path following so the robot does not instantaneously snap its heading to each new waypoint.
-
-## Required Behavior
-
-Automatic movement must:
-
-- remain frame-time based,
-- rotate progressively toward the target direction,
-- use bounded angular change,
-- avoid instant 90-degree heading jumps,
-- move toward waypoints without indefinite overshoot,
-- stop cleanly at the final waypoint,
-- preserve waypoint order,
-- preserve collision rollback/acceptance behavior,
-- remain deterministic,
-- leave manual controls unchanged when not following.
-
-Use the existing differential-drive model when practical.
-
-If a simpler heading-rate-limited controller is the smallest safe first version, it is acceptable.
-
-Do not implement:
-
-- PID tuning framework,
-- acceleration planner,
-- curvature-continuous trajectory generation,
-- dynamic obstacle avoidance,
-- automatic replanning.
-
-## Corner Behavior
-
-At sharp corners, it is acceptable for the robot to slow or rotate before advancing.
-
-Safety takes priority over constant translational speed.
-
----
-
-# Phase 8 — Automated Tests
-
-Add focused tests for newly introduced behavior.
-
-At minimum cover, where deterministic unit testing is practical:
-
-## Footprint Safety
-
-- obstacle clearance blocks an adjacent unsafe center cell,
-- a sufficiently wide route remains traversable,
-- a too-narrow corridor is rejected,
-- start footprint collision fails planning,
-- goal footprint collision fails planning,
-- boundary clearance is enforced.
-
-## Placement
-
-- root-cause placement regression,
-- Start and Goal remain consistent with approved world-boundary semantics.
-
-## Simplification
-
-- collinear waypoints simplify correctly,
-- required corners are preserved,
-- unsafe shortcut is rejected if line-of-sight compression is implemented,
-- start and goal remain preserved.
-
-## Motion
-
-- heading change is bounded per update,
-- robot progresses toward a waypoint,
-- sharp turn does not instantaneously snap heading,
-- final waypoint completes,
-- non-positive/invalid update inputs remain safe if relevant,
-- collision rejection does not consume waypoint progress.
-
-Do not remove or weaken existing tests.
-
-Do not add screenshot tests.
-
----
-
-# Phase 9 — Full Regression
-
-Perform a clean build and full test run:
 
 ```text
 mingw32-make clean
@@ -588,78 +238,324 @@ mingw32-make all
 mingw32-make test
 ```
 
-Run all relevant executables directly as well.
-
-Existing suites must still pass:
+2. Confirm:
 
 ```text
-CoordinateMapperTests.exe
-MapDataTests.exe
-MapDataFileTests.exe
-PathPlannerTests.exe
-PathExecutionTests.exe
-```
-
-Current baseline:
-
-```text
-54 PASS
+70 PASS
 0 FAIL
 ```
 
-Completion requires:
+3. Trace the exact current flow for:
 
 ```text
-54 existing tests PASS
-+ all new tests PASS
-0 FAIL
+Set Start
+→ MapData mutation
+→ validation
+→ AMR runtime pose
+
+Enter
+→ PathPlanner
+→ PathExecution
+→ first waypoint
+→ AMR movement
 ```
 
-Do not claim completion with regressions.
+4. Confirm exactly why the current AMR remains at its previous runtime pose after Start Pose changes.
+
+Do not edit production code during baseline investigation.
 
 ---
 
-# Phase 10 — Runtime Sanity Check
+# Phase 2 — Focused Multi-Agent Investigation
 
-If desktop execution is available, launch the simulator and perform a minimal runtime sanity check.
+Use no more than 3 investigation subagents concurrently.
 
-Verify:
+If agent capacity is unavailable:
 
-### Placement
+- continue remaining investigation serially,
+- do not repeatedly retry failed `spawn_agent` calls,
+- do not block completion merely because a subagent could not be created.
 
-- Start and Goal can be placed throughout the intended valid world area.
-- Invalid outside-boundary placement is clearly rejected.
+The main agent remains the single production-code integration writer.
 
-### Footprint-Aware Planning
+## Subagent A — Start Pose Editing Flow
 
-Create an obstacle wall/corner where the previous planner produced a wall-hugging path.
+Investigate:
 
-Confirm:
+- where Start Pose is created,
+- where Start Pose is moved,
+- where Start Pose heading is rotated,
+- whether all Start mutations pass through one Simulator integration point,
+- how active path state is invalidated after map edits.
 
-- new path keeps sufficient clearance,
-- AMR no longer immediately collides on a planner-approved corner,
-- an actually too-narrow route is rejected rather than planned.
+Return:
 
-### Motion
+- relevant files and symbols,
+- every Start Pose mutation path,
+- smallest reliable synchronization point,
+- regression risks.
 
-Confirm visually:
+Do not edit production code.
 
-- heading turns progressively,
-- AMR no longer instantly snaps orientation at every grid corner,
-- movement remains stable,
-- AMR completes a valid route.
+## Subagent B — AMR Pose and Reset Semantics
 
-### Replanning
+Investigate:
 
-Change the map and plan again.
+- how AMR position and heading are currently initialized,
+- whether AMR has safe pose-setting APIs,
+- whether reconstruction is currently used to reset pose,
+- current Ctrl+R/reset behavior,
+- interaction with collision/shape synchronization.
 
-Confirm:
+Return:
 
-- active route is replaced,
-- safety behavior remains correct,
-- execution restarts cleanly.
+- relevant files and symbols,
+- recommended minimal AMR API change if needed,
+- reset semantics recommendation,
+- tests required.
 
-If GUI automation cannot verify these visually, report that limitation honestly.
+Do not edit production code.
+
+## Subagent C — Execution and Test Strategy
+
+Investigate:
+
+- how PathExecution handles the first waypoint,
+- behavior when AMR is already at waypoint 0,
+- whether execution automatically advances safely,
+- how stale route state is cleared after map changes,
+- best deterministic tests for Start synchronization.
+
+Return:
+
+- relevant files and symbols,
+- any execution changes actually required,
+- smallest test plan,
+- regression risks.
+
+Do not edit production code.
+
+---
+
+# Phase 3 — Main-Agent Design Decision
+
+After investigation:
+
+1. Consolidate findings.
+2. Verify each finding directly against repository code.
+3. Choose one authoritative synchronization flow.
+4. Avoid duplicate Start/AMR synchronization logic across multiple call sites where practical.
+5. Prefer a small Simulator helper if several Start mutation paths need the same behavior.
+
+A suitable shape may resemble:
+
+```text
+Start Pose changes
+      ↓
+Simulator synchronization helper
+      ├─ update AMR pose
+      ├─ clear PathExecution
+      ├─ clear path visualization
+      └─ refresh validation
+```
+
+This is an example, not a required class/function name.
+
+Do not introduce abstractions beyond what the actual code needs.
+
+---
+
+# Phase 4 — Implement Runtime Start Synchronization
+
+Implement the smallest production change that guarantees the required semantics.
+
+## Position
+
+The AMR runtime center must match configured Start Pose position after Start placement/change.
+
+## Heading
+
+The AMR runtime heading must match configured Start Pose heading.
+
+If AMR currently lacks a clean pose-setting API, add the smallest explicit API required, for example a pose setter or position+heading setter.
+
+Any pose update must keep AMR render/collision shapes synchronized.
+
+Do not rebuild unrelated AMR movement code.
+
+## Route Invalidation
+
+Any Start Pose change must invalidate the old executable route.
+
+Required result:
+
+```text
+old PathExecution
+old path visualization
+        ↓
+cleared
+```
+
+The user must re-plan after changing Start Pose.
+
+## Validation
+
+Refresh validation after runtime pose synchronization.
+
+Do not leave Inspector validation based on stale AMR pose.
+
+---
+
+# Phase 5 — Fix Reset Semantics
+
+Inspect existing reset behavior and implement the smallest consistent rule.
+
+Preferred behavior:
+
+```text
+if Start Pose exists:
+    reset AMR to Start Pose position + heading
+else:
+    reset AMR to existing default robot pose
+```
+
+Reset must:
+
+- clear active path execution,
+- clear route visualization,
+- refresh validation,
+- preserve MapData Start/Goal configuration.
+
+Do not reinterpret reset as "clear map".
+
+---
+
+# Phase 6 — Execution Verification
+
+Confirm the successful-planning execution flow becomes:
+
+```text
+AMR already at Start Pose
+        ↓
+Enter
+        ↓
+clearance-aware A*
+        ↓
+PathExecution
+        ↓
+first waypoint recognized as reached
+        ↓
+normal following
+```
+
+Do not solve this by removing Start from the raw `PathResult.path`.
+
+Preserve existing PathPlanner path semantics.
+
+Only modify PathExecution if a reproduced defect shows it cannot safely handle the robot already being at waypoint 0.
+
+---
+
+# Phase 7 — Automated Tests
+
+Add focused regression coverage.
+
+At minimum, cover the behavior that can be tested deterministically:
+
+### Start Synchronization
+
+- placing/changing Start synchronizes AMR position,
+- Start heading synchronizes AMR heading,
+- changing Start clears active execution,
+- changing Start resets waypoint progress,
+- changing Start clears or invalidates route visualization state where testable.
+
+### Reset
+
+- reset with Start Pose returns AMR to Start position,
+- reset with Start Pose restores Start heading,
+- reset without Start Pose uses the existing default behavior,
+- reset clears active execution.
+
+### Execution
+
+- planning/execution beginning with AMR already at Start does not require an unplanned approach,
+- first waypoint advancement remains safe,
+- existing completion behavior remains correct.
+
+Prefer unit/integration tests that do not require creating an SFML window.
+
+If Simulator UI behavior is not currently testable without a window, extract only the smallest testable seam necessary.
+
+Do not build a new UI testing framework.
+
+Do not add screenshot tests.
+
+---
+
+# Phase 8 — Full Regression
+
+Run:
+
+```text
+mingw32-make clean
+mingw32-make all
+mingw32-make test
+```
+
+Also run each test executable directly.
+
+Existing baseline must remain:
+
+```text
+70 existing tests PASS
+0 FAIL
+```
+
+plus all newly added tests.
+
+Do not weaken or delete existing tests.
+
+Do not alter approved PathPlanner semantics merely to satisfy this milestone.
+
+---
+
+# Phase 9 — Runtime Sanity Check
+
+If desktop execution is available, perform the exact reproduced scenario.
+
+### Reproduction Setup
+
+1. Start with AMR on one side of an obstacle wall.
+2. Place Start Pose on the other side of that wall.
+3. Place Goal beyond Start.
+4. Press Enter.
+
+### Expected New Behavior
+
+Immediately after placing Start:
+
+```text
+AMR appears at Start Pose
+```
+
+Then after Enter:
+
+```text
+AMR follows planned Start → Goal route
+```
+
+There must be no diagonal/direct movement from the old AMR location to Start.
+
+Also verify:
+
+- changing Start after planning clears the old route,
+- rotating Start heading updates AMR heading,
+- reset returns to Start when Start exists,
+- route planning and progressive turning still work,
+- footprint clearance still works.
+
+If UI automation cannot reliably observe this, report that limitation honestly.
 
 Do not claim visual verification without observing it.
 
@@ -667,24 +563,22 @@ Do not claim visual verification without observing it.
 
 # Completion Gate
 
-The milestone is complete only when all of the following are true:
+This milestone is complete only when:
 
-- Start/Goal placement-range root cause is identified.
-- Placement behavior is corrected without weakening approved map semantics.
-- Path planning accounts for AMR body clearance.
-- Planner does not intentionally return routes that the conservative footprint model says are physically invalid.
-- Boundary clearance accounts for the robot footprint.
-- Raw execution waypoints are simplified at least for redundant collinear points.
-- Any more aggressive simplification is safety-checked.
-- Automatic heading changes are progressive rather than instantaneous.
-- Existing manual controls remain functional when not following.
-- Existing A* ownership and MapData ownership remain intact.
-- Clean build passes.
-- All existing tests pass.
-- All new tests pass.
-- STATUS accurately describes the resulting implementation and remaining limitations.
+- Start Pose and runtime AMR pose have consistent semantics.
+- AMR position synchronizes when Start changes.
+- AMR heading synchronizes when Start heading changes.
+- changing Start invalidates the previous executable path.
+- robot reset is consistent with configured Start Pose.
+- Enter does not cause an unplanned autonomous approach to Start.
+- PathPlanner raw path semantics remain unchanged.
+- clearance-aware planning still works.
+- progressive movement still works.
+- all existing tests pass.
+- all new tests pass.
+- `docs/agent/STATUS.md` accurately reflects the new state.
 
-If any requirement cannot be safely completed, report the exact blocker and do not silently omit it.
+If any requirement cannot be completed safely, report the exact blocker.
 
 ---
 
@@ -692,24 +586,20 @@ If any requirement cannot be safely completed, report the exact blocker and do n
 
 Do not implement:
 
-- automatic replanning,
-- dynamic obstacle detection,
-- dynamic obstacle avoidance,
-- D* / D* Lite,
-- RRT / RRT*,
-- costmaps as a generalized subsystem,
-- orientation-expanded A* state,
-- full nonholonomic search,
-- spline/path-curvature optimization,
-- PID framework,
-- acceleration/deceleration profiles,
-- localization uncertainty,
-- multi-robot coordination,
-- ROS integration,
-- new map-file format,
-- unrelated editor features,
-- unrelated UI redesign,
-- Makefile header-dependency work.
+- replanning,
+- dynamic obstacles,
+- line-of-sight path shortcutting,
+- spline smoothing,
+- acceleration profiles,
+- PID control,
+- goal-heading execution,
+- swept-volume collision,
+- orientation-aware footprint search,
+- map resizing,
+- world-boundary redesign,
+- UI redesign,
+- Makefile dependency tracking,
+- unrelated refactors.
 
 Do not modify:
 
@@ -718,66 +608,57 @@ Do not modify:
 - `Document.md`
 - `docs/specs/README.md`
 
-Do not perform unrelated refactoring.
+Do not spend token budget on unrelated documentation cleanup.
 
 ---
 
 # Multi-Agent Rules
 
-Recommended initial structure:
+Use up to 3 investigation subagents concurrently.
+
+Recommended structure:
 
 ```text
 Main Sol Agent
-├── Explorer A: Start/Goal placement + boundary/viewport
-├── Explorer B: footprint-aware traversability
-├── Explorer C: path simplification
-└── Explorer D: AMR motion controller
+├── Explorer A: Start Pose editor flow
+├── Explorer B: AMR pose/reset semantics
+└── Explorer C: PathExecution + tests
 ```
 
-Subagents investigate and report.
+Important:
 
-The main agent is the single production-code integration writer.
-
-The main agent may delegate isolated test implementation only when:
-
-- the file ownership is non-overlapping,
-- the expected behavior is already decided,
-- concurrent edits cannot collide.
-
-Subagent findings are advisory.
-
-The main agent must verify findings against actual code and approved specifications before changing behavior.
+- Do not spawn extra agents merely because capacity exists.
+- Reuse findings already returned by completed agents.
+- If `agent thread limit reached` occurs, continue serially.
+- Do not repeatedly retry failed agent spawns.
+- Subagents should be read-only investigators unless the main agent delegates a clearly isolated non-overlapping test file.
+- The main agent owns all production integration.
 
 ---
 
 # Long-Running Task Rules
 
-This plan intentionally authorizes several sequential engineering phases.
+This plan authorizes investigation, implementation, testing, regression, and STATUS update as one complete task.
 
-Do not stop after:
+Do not stop after investigation only.
 
-- footprint investigation only,
-- one fixed bug,
-- path simplification only,
-- motion improvement only,
-- one passing targeted test.
+Do not stop after adding an AMR setter only.
 
-Continue through the Completion Gate unless blocked.
+Do not stop after the first targeted test passes.
 
-Use this cycle:
+Continue until the Completion Gate is satisfied or a genuine blocker is found.
+
+Use:
 
 ```text
 investigate
 → decide
-→ implement one coherent phase
-→ targeted tests
-→ verify
-→ continue
+→ implement
+→ targeted test
+→ full regression
+→ STATUS
+→ stop
 ```
-
-If implementation complexity grows significantly beyond this plan, reduce scope to the smallest design satisfying the explicit first-version requirements.
-
-Do not expand scope merely to consume token budget.
 
 ---
 
@@ -787,20 +668,16 @@ Update only:
 
 `docs/agent/STATUS.md`
 
-Keep it concise and current-state oriented.
+Record concisely:
 
-Record:
-
-- current milestone,
-- placement-range root cause and resulting behavior,
-- footprint/traversability model,
-- path-simplification behavior,
-- automatic motion behavior,
-- ownership decisions,
+- Start Pose / runtime AMR semantics,
+- synchronization behavior,
+- reset behavior,
+- route invalidation behavior,
 - verification results,
 - total PASS / FAIL count,
 - runtime verification status,
-- known limitations,
+- remaining limitations,
 - next smallest meaningful milestone.
 
 Do not turn STATUS into a chronological log.
@@ -817,7 +694,7 @@ For this orchestrated run:
 
 The external orchestrator owns Git finalization after Codex exits successfully.
 
-This task-specific instruction overrides repository instructions that assign Git finalization to Codex.
+This task-specific rule overrides repository instructions that assign Git finalization to Codex.
 
 ---
 
@@ -827,10 +704,10 @@ Before STOP, report:
 
 1. Production files modified or added
 2. Tests modified or added
-3. Start/Goal placement root cause and fix
-4. Footprint-aware planning design and behavior
-5. Path simplification behavior
-6. Motion-controller improvement
+3. Root cause confirmed
+4. Start Pose synchronization behavior
+5. Reset behavior
+6. Execution behavior after the fix
 7. Verification commands and results
 8. Total PASS / FAIL count
 9. Runtime sanity-check result
