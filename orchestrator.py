@@ -75,6 +75,7 @@ result = subprocess.run(
     cwd=REPO_PATH,
     input=codex_prompt,
     text=True,
+    encoding="utf-8",
     shell=True,
 )
 
