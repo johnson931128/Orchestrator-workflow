@@ -58,6 +58,10 @@ codex_command = subprocess.list2cmdline(
     [
         CODEX_PATH,
         "exec",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        'model_reasoning_effort="high"',
         "--sandbox",
         "workspace-write",
         "-",
