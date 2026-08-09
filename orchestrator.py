@@ -5,7 +5,7 @@ import sys
 
 ORCHESTRATOR_DIR = Path(__file__).parent
 REPO_PATH = Path(r"C:\programing\SFML\CtrlKine-AMR")
-TASK_FILE = ORCHESTRATOR_DIR / "tasks" / "NEXT_TASK.md"
+TASK_FILE = ORCHESTRATOR_DIR / "tasks" / "NEXT_PLAN.md"
 
 CODEX_PATH = shutil.which("codex.cmd")
 
