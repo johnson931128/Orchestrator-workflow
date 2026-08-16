@@ -1,312 +1,312 @@
-# Next Plan
+# NEXT_PLAN.md
 
-## Milestone
+# Milestone: Pre-SLAM Architecture, UI, and 360° LiDAR Refactor
 
-Implement a complete first-version native AMCL localization subsystem for CtrlKine-AMR.
+## 0. Mission
 
-The goal is not to add a decorative particle cloud. The goal is to establish a real localization pipeline with explicit separation between ground truth, odometry, sensor observations, particle belief, estimated pose, uncertainty, adaptive resampling, and recovery.
+Perform a deliberate architecture and presentation refactor before beginning SLAM work.
 
-This is an intentionally large, long-running, multi-phase milestone.
+The repository has reached a point where the major subsystems are functionally meaningful:
 
-The main agent must continue through architecture, implementation, integration, deterministic tests, convergence tests, kidnapped-robot recovery tests, full regression, and STATUS update unless a genuine blocker makes safe completion impossible.
+* Map editing
+* Map persistence
+* Start / Goal configuration
+* A* path planning
+* Clearance-aware navigation
+* Path execution
+* AMR runtime motion
+* Simulated odometry
+* Simulated LiDAR
+* AMCL particle filtering
+* Likelihood-field localization
+* KLD adaptive sampling
+* Recovery
+* Particle clustering
+* Ambiguity detection
+* Global localization
+* Kidnapped-robot recovery
+* Optional localization-driven navigation
+* Localization visualization and diagnostics
 
-Do not stop after implementing only one AMCL component.
+The next milestone must **not** add another major algorithm.
+
+Instead, consolidate the codebase so that future SLAM, navigation, and sensor work can be added without turning `Simulator`, `Environment`, or localization code into monolithic modules.
+
+Primary goals:
+
+1. Audit and improve subsystem responsibilities.
+2. Reduce `Simulator` responsibility and coupling.
+3. Reorganize the right-side Inspector into clean category tabs.
+4. Improve general desktop visual polish and layout.
+5. Convert the LiDAR model to clean 360° full-circle semantics.
+6. Prepare LiDAR data structures for future SLAM without implementing SLAM.
+7. Preserve all existing navigation and AMCL behavior.
+8. Preserve or improve testability.
+9. Perform a final architecture review after implementation.
+
+This is intentionally a large multi-phase task.
+
+Do not stop after the first refactor or first successful build.
 
 ---
 
-## Current Baseline
+# 1. Current Baseline
 
-The repository currently has:
+Current repository state includes the hardened AMCL milestone.
 
-- C++ / SFML 2D AMR simulator and map editor.
-- `MapData` as authoritative persistent map state.
-- `CoordinateMapper` for grid/world conversion.
-- `AMR` as runtime ground-truth robot pose and geometry.
-- Start Pose synchronized with runtime AMR pose.
-- Grid-based A* path planning.
-- Clearance-aware runtime planning.
-- Path execution and visualization.
-- Collinear waypoint compression.
-- Progressive stop-turn-go motion.
-- Runtime collision checking.
-- Current automated baseline: 79 PASS, 0 FAIL.
-
-Existing suites:
+Known normal regression baseline:
 
 ```text
-CoordinateMapperTests.exe   6 PASS
-MapDataTests.exe           16 PASS
-MapDataFileTests.exe       15 PASS
-PathPlannerTests.exe       14 PASS
-PathExecutionTests.exe     19 PASS
-SimulatorRuntimeTests.exe   9 PASS
+164 PASS
+0 FAIL
 ```
 
-Preserve all existing behavior unless this milestone explicitly extends it.
-
----
-
-# Primary Goal
-
-After this milestone, the simulator must support this localization flow:
+Known extended localization stress baseline:
 
 ```text
-AMR ground-truth pose
-        │
-        ├─────────────────────┐
-        │                     │
-        ↓                     ↓
-Noisy odometry          Simulated 2D LiDAR
-        │                     │
-        ↓                     ↓
-Differential motion     Likelihood-field
-model update            sensor update
-        │                     │
-        └──────────┬──────────┘
-                   ↓
-             Particle filter
-                   ↓
-        weight normalization
-                   ↓
-         ESS / resample gate
-                   ↓
-       adaptive KLD resampling
-                   ↓
-          recovery injection
-                   ↓
-      estimated pose + covariance
-                   ↓
- particle cloud / estimated pose / inspector
+4 PASS
+0 FAIL
 ```
 
-The localization estimate must not read the AMR ground-truth pose as its answer.
-
-Ground truth may only be used by:
-
-- sensor simulation,
-- odometry simulation,
-- test truth/error measurement,
-- visualization/debugging.
-
-AMCL itself must consume simulated odometry and simulated laser measurements.
-
----
-
-# Required Architectural Separation
-
-The implementation must explicitly distinguish:
+Current relevant capabilities include:
 
 ```text
-Ground Truth Pose
-    actual AMR runtime pose
+AMR
+MapData
+Environment
+MapValidator
+PathPlanner
+PathExecution
 
-Odometry Pose / Increment
-    noisy dead-reckoning information
+LidarSimulator
+OdometrySimulator
+MapLikelihoodField
+ParticleFilter
+AmclLocalizer
 
-Laser Scan
-    noisy range measurements from simulated sensor
+LocalizationConfig
+LocalizationVisualization
 
-Particle Belief
-    set of weighted pose hypotheses
-
-Estimated Pose
-    localization result derived from particle belief
-
-Estimated Covariance
-    uncertainty derived from particle belief
+Simulator
 ```
 
-Do not collapse these concepts into one pose field.
+The stable simulation-truth navigation mode remains the default.
 
-Do not allow AMCL to simply copy `AMR::getPosition()` or `AMR::getHeading()`.
+Localization-driven navigation is optional.
 
----
-
-# AMCL Scope
-
-This milestone includes all of the following first-version components:
-
-1. Localization data model
-2. Deterministic random-number ownership
-3. 2D LiDAR simulator
-4. Map distance / likelihood representation
-5. Noisy odometry simulator
-6. Differential-drive particle motion model
-7. Local Gaussian particle initialization
-8. Global free-space particle initialization
-9. Likelihood-field laser sensor model
-10. Particle weight normalization
-11. Effective sample size
-12. Low-variance/systematic resampling
-13. Adaptive KLD particle-count control
-14. Fast/slow recovery statistics
-15. Random-particle recovery injection
-16. Weighted pose estimation
-17. Circular heading mean
-18. Pose covariance
-19. Convergence/error metrics
-20. Simulator runtime integration
-21. Particle-cloud rendering
-22. Estimated-pose rendering
-23. Optional LiDAR rendering if inexpensive
-24. Inspector localization statistics
-25. Deterministic unit tests
-26. End-to-end convergence test
-27. Moving-localization tracking test
-28. Kidnapped-robot recovery test
-29. Full existing regression
-
-This is intentionally a full vertical slice.
+Ground truth must remain separate from localization inference.
 
 ---
 
-# First-Version Non-Goals
+# 2. User-Observed Runtime Issues
 
-Do not implement:
+The current desktop runtime is functionally strong but visually and architecturally rough.
 
-- ROS
-- ROS 2
-- TF tree
-- nav_msgs / sensor_msgs
-- pluginlib
-- external AMCL dependency
-- SLAM
-- map building
-- dynamic obstacle tracking
-- multi-LiDAR fusion
-- IMU fusion
-- EKF / UKF
-- 3D localization
-- 3D LiDAR
-- scan matching
-- ICP
-- graph SLAM
-- localization persistence across application restart
-- production-grade real-time optimization
-- GPU acceleration
-- path-planner redesign
-- 8-neighbor A*
-- Theta*
-- path smoothing
-- controller redesign
-- dynamic replanning
+Observed issues:
 
-AMCL must be implemented natively in this repository using the existing map and simulator.
+## 2.1 Inspector overload
 
-Do not copy ROS/Nav2 implementation wholesale.
+The right-side Inspector contains too many unrelated sections in one long vertical stream.
 
-Use standard AMCL concepts, but keep the code appropriate for this project's scale and architecture.
-
----
-
-# Reference Behavior
-
-Use standard AMCL concepts:
+Examples currently include:
 
 ```text
-Known static 2D map
-+ differential odometry
-+ 2D laser observations
-+ particle filter
-+ likelihood-field sensor model
-+ adaptive particle count
-+ recovery sampling
-→ estimated robot pose
+Cursor
+Map Stats
+Map Validation
+Selected Object
+Robot State
+Path Planning
+Navigation
+Localization
+Sensor diagnostics
+Particle diagnostics
+Recovery
+Layers
+etc.
 ```
 
-Recommended parameter vocabulary:
+The problem is not that the information is unnecessary.
+
+The problem is lack of information hierarchy.
+
+The Inspector should become a category-based panel similar to a browser or IDE tab layout.
+
+Target conceptual organization:
 
 ```text
-alpha1
-alpha2
-alpha3
-alpha4
-alpha5
-
-minParticles
-maxParticles
-
-pfErr
-pfZ
-
-recoveryAlphaSlow
-recoveryAlphaFast
-
-sigmaHit
-zHit
-zRand
-likelihoodMaxDistance
-
-maxBeams
-
-updateMinTranslation
-updateMinRotation
-
-resampleInterval
+Map | Navigation | Localization
 ```
 
-Names may follow the project's existing C++ style.
+Potentially a fourth category is allowed if architecture review clearly justifies it.
 
-Do not introduce parameters that have no first-version behavior.
+Do not create tabs solely for visual symmetry.
+
+## 2.2 Window and layout density
+
+The current application window and panel proportions are becoming too small for the amount of information displayed.
+
+Review:
+
+* default window size,
+* minimum practical window size,
+* simulation viewport size,
+* Inspector width,
+* toolbar density,
+* legend placement,
+* text spacing,
+* scroll behavior,
+* resize behavior.
+
+The UI should feel less cramped while preserving usability on ordinary desktop resolutions.
+
+## 2.3 Visual roughness
+
+Some visual elements are technically correct but do not feel polished or visually coherent.
+
+Review:
+
+* spacing,
+* alignment,
+* typography hierarchy,
+* marker scale,
+* alpha/transparency,
+* status colors,
+* tab highlighting,
+* selection outlines,
+* debug overlays,
+* localization markers,
+* covariance rendering,
+* LiDAR rendering,
+* legend presentation.
+
+Do not redesign the application into a different product.
+
+Keep the existing lightweight SFML style.
+
+## 2.4 LiDAR field of view
+
+The current LiDAR default is not a full-circle scan.
+
+For future 2D SLAM work, the simulator should support clean 360° planar LiDAR semantics.
+
+Do not implement SLAM in this milestone.
 
 ---
 
-# Required Initial Reading
+# 3. High-Level Strategy
 
-The main agent must first read:
-
-- `AGENTS.md`
-- `docs/agent/STATUS.md`
-- `docs/specs/SystemOverview.md`
-- `docs/specs/MapCoordinateSpec.md`
-- `docs/specs/PathPlannerSpec.md`
-
-Then inspect current files responsible for:
-
-- `Simulator`
-- `AMR`
-- `Environment`
-- `MapData`
-- `CoordinateMapper`
-- `MapValidator`
-- `PathPlanner`
-- `PathExecution`
-- collision geometry
-- rendering
-- Inspector UI
-- tests
-- Makefile
-
-Search the repository for:
+Use multi-agent reasoning primarily for:
 
 ```text
-AMCL
-localization
-particle
-laser
-lidar
-odometry
-sensor
-range
-ray
+parallel architecture analysis
+parallel responsibility audit
+parallel review
 ```
 
-Confirm whether any reusable localization code already exists before adding new components.
+Do not let several agents independently rewrite overlapping production files.
 
-Do not read unrelated documentation.
+Recommended structure:
 
-Do not update:
+```text
+Main Agent
+    architecture owner
+    integration owner
+    production implementation owner
 
-- `README.md`
-- `Document.md`
-- `docs/specs/README.md`
-- `AGENTS.md`
+Explorer A
+    architecture / responsibility audit
+
+Explorer B
+    UI / rendering / Inspector audit
+
+Explorer C
+    sensor / localization / future-SLAM audit
+```
+
+After implementation:
+
+```text
+Reviewer A
+    architecture review
+
+Reviewer B
+    runtime / UI review
+
+Reviewer C
+    regression / test review
+```
+
+If agent capacity is unavailable:
+
+* continue serially,
+* do not repeatedly retry failed spawns,
+* do not stop the task.
 
 ---
 
-# Phase 1 — Clean Baseline
+# 4. Required Initial Reading
 
-Before production edits:
+Before modifying production code, read:
+
+```text
+AGENTS.md
+docs/agent/STATUS.md
+docs/specs/SystemOverview.md
+docs/specs/MapCoordinateSpec.md
+docs/specs/PathPlannerSpec.md
+```
+
+Then inspect at minimum:
+
+```text
+include/Simulator.hpp
+src/Simulator.cpp
+
+include/Environment.hpp
+src/Environment.cpp
+
+include/AMR.hpp
+src/AMR.cpp
+
+include/MapData.hpp
+src/MapData.cpp
+
+include/PathPlanner.hpp
+src/PathPlanner.cpp
+
+include/PathExecution.hpp
+src/PathExecution.cpp
+
+include/LidarSimulator.hpp
+src/LidarSimulator.cpp
+
+include/LocalizationTypes.hpp
+
+include/LocalizationVisualization.hpp
+src/LocalizationVisualization.cpp
+
+include/AmclLocalizer.hpp
+src/AmclLocalizer.cpp
+
+include/ParticleFilter.hpp
+src/ParticleFilter.cpp
+
+include/LocalizationConfig.hpp
+src/LocalizationConfig.cpp
+
+Makefile
+```
+
+Inspect all current test executables relevant to these modules.
+
+Do not perform broad unrelated repository reading.
+
+---
+
+# 5. Phase 1 — Baseline Verification
+
+Run:
 
 ```text
 mingw32-make clean
@@ -314,1135 +314,1125 @@ mingw32-make all
 mingw32-make test
 ```
 
-Confirm:
+Run all normal test executables directly.
+
+Also run:
 
 ```text
-79 PASS
+mingw32-make test-localization-stress
+```
+
+if still supported by the current Makefile.
+
+Expected baseline:
+
+```text
+Normal:
+164 PASS
+0 FAIL
+
+Extended localization stress:
+4 PASS
 0 FAIL
 ```
 
-Also run the six existing test executables directly.
+If baseline differs, investigate before starting architecture changes.
 
-Record the current:
-
-- AMR pose representation
-- AMR update flow
-- automatic motion flow
-- manual motion flow
-- collision acceptance flow
-- MapData obstacle representation
-- world boundary representation
-- grid resolution
-- Simulator update order
-- Simulator render order
-- Inspector layout
-
-Do not edit production code during baseline collection.
+Do not begin a large refactor on top of unexplained failures.
 
 ---
 
-# Phase 2 — Multi-Agent Investigation Batch
+# 6. Phase 2 — Architecture Audit
 
-Use no more than 3 live investigation subagents concurrently.
+Use Explorer A.
 
-If `agent thread limit reached` occurs:
+Perform a responsibility and dependency audit of the current codebase.
 
-- do not repeatedly retry,
-- continue remaining investigation serially,
-- do not block the milestone solely because another subagent cannot be created.
+For every major class, identify:
 
-Subagents are primarily read-only investigators.
+```text
+What state does it own?
+What behavior does it own?
+What other modules does it know about?
+What other modules know about it?
+Does it perform rendering?
+Does it perform input handling?
+Does it perform algorithmic work?
+Does it perform persistence?
+Does it coordinate other modules?
+```
 
-The main agent is the production integration owner.
+Pay particular attention to:
 
-## Explorer A — Localization Architecture and Particle Filter
+```text
+Simulator
+Environment
+AMR
+MapData
+PathPlanner
+PathExecution
+AmclLocalizer
+ParticleFilter
+LocalizationVisualization
+```
 
-Investigate how a native AMCL subsystem should fit the existing repository.
+Identify:
 
-Focus on:
+* god-object tendencies,
+* duplicated state,
+* cyclic conceptual dependencies,
+* inappropriate rendering dependencies,
+* inappropriate algorithm/UI dependencies,
+* helper functions living in the wrong module,
+* stale or misleading abstractions,
+* structures that mix persistent and runtime state,
+* places where future SLAM would worsen coupling.
 
-- particle data structure
-- AMCL configuration
-- RNG ownership
-- initialization
-- motion update
-- weight update
-- normalization
-- ESS
-- resampling
-- KLD sampling
-- recovery injection
-- pose estimate
-- covariance
-- deterministic testing
+Do not edit production code during this audit.
 
-Return:
-
-- recommended classes/files
-- responsibility boundaries
-- state lifecycle
-- update API
-- initialization API
-- reset/reinitialize behavior
-- deterministic RNG strategy
-- edge cases
-- test strategy
-- integration risks
-
-Do not edit production code.
-
-## Explorer B — LiDAR and Map Likelihood Model
-
-Investigate the existing map geometry and design the simulated range sensor and likelihood representation.
-
-Focus on:
-
-- ray casting against obstacle cell AABBs
-- ray termination at world boundary
-- beam angles
-- min/max range
-- range noise
-- beam subsampling
-- obstacle-distance queries
-- likelihood field
-- map-change invalidation
-- computational cost for current map scale
-
-Return:
-
-- recommended classes/files
-- ray intersection algorithm
-- map-distance representation
-- update/rebuild policy
-- numerical tolerances
-- test cases
-- performance risks
-
-Do not edit production code.
-
-## Explorer C — Odometry and Simulator Integration
-
-Investigate runtime motion and where localization updates should occur.
-
-Focus on:
-
-- ground-truth pose capture
-- previous/current pose delta
-- manual motion
-- autonomous following
-- reset/start synchronization
-- map editing
-- planning
-- rendering
-- Inspector
-- collision rollback
-- localization initialization/reinitialization
-
-Return:
-
-- exact integration points
-- recommended noisy odometry model
-- update ordering
-- reset semantics
-- visualization ownership
-- Inspector fields
-- test seams
-- regression risks
-
-Do not edit production code.
+Produce a concise architecture recommendation for the Main Agent.
 
 ---
 
-# Phase 3 — Main-Agent Architecture Synthesis
+# 7. Phase 3 — UI / Rendering Audit
 
-After investigation:
+Use Explorer B.
 
-1. Verify subagent findings directly against repository code.
-2. Consolidate class responsibilities.
-3. Prevent circular dependencies.
-4. Prefer plain C++ value types and narrowly scoped classes.
-5. Keep SFML dependency out of pure probabilistic logic where practical.
-6. Keep AMCL independent of rendering.
-7. Keep sensor simulation separate from particle-filter inference.
-8. Keep MapData authoritative for map geometry.
-9. Keep AMR authoritative for ground truth only.
+Inspect:
 
-Recommended conceptual dependency direction:
+```text
+window layout
+toolbar
+Inspector
+legend
+scrolling
+selection UI
+localization overlays
+LiDAR drawing
+path drawing
+map drawing
+robot drawing
+```
+
+Determine which UI responsibilities currently belong to `Simulator`.
+
+Identify candidates that could reasonably move into dedicated components.
+
+Possible conceptual components include:
+
+```text
+InspectorPanel
+Toolbar
+LocalizationRenderer
+SimulationViewport
+DebugOverlay
+```
+
+These names are examples only.
+
+Do not create classes merely to reduce line count.
+
+A new class must own a coherent responsibility.
+
+For the Inspector specifically, propose:
+
+```text
+tabs
+sections per tab
+layout behavior
+scroll behavior
+resize behavior
+selection/state presentation
+```
+
+Do not edit production code during the audit.
+
+---
+
+# 8. Phase 4 — LiDAR / Future SLAM Audit
+
+Use Explorer C.
+
+Inspect:
+
+```text
+LidarSimulator
+LaserScan
+LocalizationTypes
+AMCL sensor update path
+LiDAR visualization
+LocalizationConfig
+```
+
+Determine:
+
+* current FOV semantics,
+* beam indexing semantics,
+* angle representation,
+* whether first/last beam duplicate for a full-circle scan,
+* range semantics,
+* extrinsics semantics,
+* current scan metadata,
+* assumptions inside AMCL,
+* assumptions inside rendering,
+* assumptions future SLAM would need removed.
+
+Design a clean full-circle scan contract.
+
+Future SLAM compatibility should be considered, but SLAM itself must remain out of scope.
+
+Do not edit production code during the audit.
+
+---
+
+# 9. Phase 5 — Main Architecture Decision
+
+After all audits:
+
+The Main Agent must independently verify important claims in source.
+
+Then create an internal target responsibility map.
+
+A healthy target should roughly preserve:
 
 ```text
 MapData
-   ↓
-DistanceField / LidarSimulator
+    persistent map/domain state
 
-AMR ground truth
-   ↓
+Environment
+    editor-facing map interactions and environment rendering
+
+AMR
+    robot ground-truth runtime state and body geometry
+
+PathPlanner
+    planning algorithm
+
+PathExecution
+    path execution state
+
+LidarSimulator
+    LiDAR measurement simulation
+
 OdometrySimulator
-   ↓
-AmclLocalizer
-       ↑
-LaserScan
+    odometry measurement simulation
+
+MapLikelihoodField
+    derived localization map representation
+
+ParticleFilter
+    particle belief algorithm
 
 AmclLocalizer
-   ↓
-LocalizationEstimate
+    localization lifecycle/orchestration
 
 Simulator
-   coordinates all of the above
+    application-level orchestration
+
+UI components
+    presentation and interaction only
 ```
 
-Do not create a single giant `AMCL.cpp` containing every responsibility.
+`Simulator` may coordinate subsystems.
 
-Do not over-fragment the implementation into unnecessary abstractions either.
+It should not contain large amounts of:
+
+```text
+Inspector formatting
+tab rendering
+localization drawing math
+generic toolbar layout logic
+algorithmic localization calculations
+```
+
+Do not force excessive abstraction.
+
+The goal is clearer responsibility, not maximum class count.
 
 ---
 
-# Phase 4 — Localization Data Model
+# 10. Phase 6 — Refactor Safety Rules
 
-Introduce the minimum clear value types required.
+Architecture refactor must preserve observable behavior unless explicitly changed later in this plan.
 
-Recommended concepts:
+During structural refactoring:
 
 ```text
-Particle
-    Pose2D pose
-    double weight
-
-LaserScan
-    vector<float> ranges
-    angleMin
-    angleIncrement
-    minRange
-    maxRange
-
-OdometryDelta
-    translation / rotation decomposition
-    or equivalent differential motion delta
-
-LocalizationEstimate
-    Pose2D pose
-    covariance
-    valid/converged flags
-    particleCount
-    effectiveSampleSize
-
-AmclConfig
-    particle counts
-    noise parameters
-    likelihood parameters
-    thresholds
-    recovery parameters
-    deterministic seed
+no new navigation algorithm
+no new localization algorithm
+no SLAM
+no path smoothing
+no 8-neighbor A*
+no controller redesign
 ```
 
-Use `double` for probability/statistical calculations unless current code conventions strongly justify otherwise.
+After each major extraction:
 
-Pose/world values may interoperate with existing `Pose2D`.
+```text
+build
+targeted tests
+```
 
-Avoid ROS-like message wrappers.
+Do not perform the entire refactor and test only at the end.
 
 ---
 
-# Phase 5 — Deterministic Random Number Ownership
+# 11. Phase 7 — Simulator Responsibility Reduction
 
-AMCL behavior must be testable.
+Inspect `Simulator.cpp` carefully.
 
-Implement one explicit RNG ownership path.
+Separate responsibilities where justified.
 
-Requirements:
+Likely extraction candidates include:
 
-- deterministic seed can be configured for tests,
-- production/default seed behavior is explicit,
-- subcomponents do not each create independent hidden random engines,
-- Gaussian and uniform sampling use the owned RNG,
-- tests do not depend on wall-clock seeding.
+```text
+Inspector rendering/state
+Localization overlay rendering
+Toolbar presentation
+UI layout helpers
+```
 
-Do not use `rand()`.
+Do not move:
+
+```text
+application lifecycle orchestration
+subsystem coordination
+mode transitions
+high-level event routing
+```
+
+out of `Simulator` unless there is a clearly better owner.
+
+The Main Agent must avoid introducing an equally large replacement god object.
 
 ---
 
-# Phase 6 — 2D LiDAR Simulator
+# 12. Phase 8 — Localization Rendering Responsibility
 
-Implement a native simulated 2D range sensor.
+Review `LocalizationVisualization`.
 
-## Inputs
+If it is currently too small or too limited relative to the rendering responsibility still inside `Simulator`, evolve it into a coherent localization presentation module.
 
-```text
-ground-truth pose
-MapData
-LiDAR configuration
-RNG
-```
-
-## Outputs
+Potential responsibilities:
 
 ```text
-LaserScan
+particle cloud drawing
+AMCL estimate marker
+covariance ellipse
+odometry marker
+LiDAR hit-point visualization
+LiDAR ray visualization
+localization visual style
 ```
 
-## Required Behavior
+It must not:
 
-Support:
+```text
+change particle weights
+consume inference RNG
+perform AMCL updates
+change localization state
+```
 
-- configurable field of view
-- configurable beam count
-- minimum range
-- maximum range
-- sensor heading relative to AMR heading
-- optional Gaussian range noise
-- deterministic noise with configured RNG
-- world-boundary termination
-- obstacle-cell intersection
-
-First version may assume LiDAR origin is AMR center.
-
-Do not model sensor height or 3D geometry.
-
-## Ray Casting
-
-Each beam must determine the nearest valid hit against:
-
-- occupied obstacle cell rectangles
-- world boundary termination
-
-Use a deterministic geometric method.
-
-For current map size, correctness is more important than advanced spatial acceleration.
-
-Avoid stepping by an arbitrarily large increment that can skip thin geometry.
-
-A grid traversal or exact ray/AABB intersection approach is preferred.
-
-## Edge Cases
-
-Test:
-
-- no obstacle before max range
-- obstacle directly ahead
-- nearest of multiple obstacles
-- boundary hit
-- diagonal beam
-- origin near obstacle
-- max-range clamp
-- deterministic noise
-- invalid configuration rejection
+Rendering must remain observational.
 
 ---
 
-# Phase 7 — Likelihood / Distance Field
+# 13. Phase 9 — UI Layout Model
 
-Build a reusable known-map likelihood representation.
+Improve the desktop layout.
 
-## Purpose
+Review the current default window dimensions.
 
-The likelihood-field sensor model requires:
+Select a larger default size appropriate for the current application.
+
+Target characteristics:
 
 ```text
-query world point
-→ distance to nearest occupied map surface
+larger default viewport
+wider Inspector
+comfortable toolbar spacing
+clear tab strip
+reasonable minimum usable dimensions
+proper resizing
 ```
 
-## Requirements
+Do not hard-code assumptions that only work at one exact resolution.
 
-- derived from physical MapData
-- not persisted into map files
-- rebuilt when relevant map geometry changes
-- deterministic
-- bounded by configurable `likelihoodMaxDistance`
-- handles world boundary consistently with LiDAR simulation
-- efficient enough for max particle count × selected beams
-
-For current grid scale, a precomputed grid-based distance field is acceptable.
-
-If using a grid distance field:
-
-- document cell-center vs surface-distance semantics,
-- preserve CoordinateMapper usage,
-- do not mutate MapData.
-
-If exact obstacle-surface distance is simple enough, that is also acceptable.
-
-Add unit tests around known obstacle configurations.
+Ensure simulation viewport and Inspector geometry update correctly on resize.
 
 ---
 
-# Phase 8 — Noisy Odometry Simulator
+# 14. Phase 10 — Inspector Tab Architecture
 
-Introduce odometry distinct from ground truth.
+Replace the single long Inspector information stream with tabs.
 
-## Required Flow
+Minimum target tabs:
 
 ```text
-previous ground-truth AMR pose
-        ↓
-current ground-truth AMR pose
-        ↓
-compute true incremental motion
-        ↓
-inject configurable odometry noise
-        ↓
-produce noisy odometry increment / odom pose
+Map
+Navigation
+Localization
 ```
 
-The localizer must receive the noisy result, not the true pose.
+Recommended content:
 
-## Required Behavior
+## Map
 
-- supports forward motion
-- supports in-place rotation
-- supports combined translation/rotation
-- normalizes angles
-- zero motion remains stable
-- deterministic with fixed seed
-- integrates during both manual and autonomous movement
+```text
+Cursor
+Map Stats
+Map Validation
+Selected Object
+```
 
-Do not modify AMR physics solely to create odometry.
+## Navigation
 
-Odometry simulation observes executed AMR motion.
+```text
+Robot State
+Navigation Mode
+Planning Start Source
+Path Planning
+Path Execution
+Stop Reason
+Goal / Start information where relevant
+```
 
-Collision rollback must not generate fake odometry motion for a motion that was rejected.
+## Localization
+
+```text
+Localization State
+Localization Support
+Initialization Mode
+Estimated Pose
+Odometry Pose
+Ground Truth diagnostic
+Position / Heading error diagnostic
+Covariance
+Particles
+ESS
+Entropy
+Clusters
+Dominant Weight
+Second Weight
+Recovery
+Sensor quality
+Beam accounting
+Visualization layers
+```
+
+If information is duplicated across tabs, remove duplication where possible.
+
+Do not create a fourth tab unless audit demonstrates a clear category.
 
 ---
 
-# Phase 9 — Particle Initialization
+# 15. Phase 11 — Inspector Interaction
 
-Support both first-version initialization modes.
-
-## Local Gaussian Initialization
-
-Input:
-
-```text
-initial mean pose
-initial x/y/yaw standard deviations or covariance
-```
-
-Generate particles around the configured initial pose.
-
-Use valid finite poses.
-
-Particles outside the world or inside occupied space must be rejected/resampled or handled by a documented deterministic policy.
-
-## Global Initialization
-
-Generate particles across valid free map space.
-
-Requirements:
-
-- position uniformly distributed over valid free area/cells
-- heading uniformly distributed over [-pi, pi)
-- particle weights initially normalized
-- obey `minParticles` / configured initialization count
-
-Global initialization must not use the true AMR pose.
-
----
-
-# Phase 10 — Differential Motion Model
-
-Implement the AMCL particle motion update using noisy differential-drive odometry.
-
-Use a standard odometry decomposition such as:
-
-```text
-rot1
-trans
-rot2
-```
-
-with configurable noise parameters analogous to:
-
-```text
-alpha1
-alpha2
-alpha3
-alpha4
-alpha5
-```
-
-Requirements:
-
-- particle propagation depends on measured odometry increment
-- noise magnitude scales with motion
-- heading is normalized
-- zero/near-zero translation handles rotation without numerical instability
-- deterministic with fixed seed
-- no ground-truth pose access
-
-Do not directly move every particle by the same exact ground-truth delta.
-
-Add statistical but deterministic-seed tests.
-
----
-
-# Phase 11 — Likelihood-Field Laser Sensor Model
-
-Implement the first-version AMCL observation model.
-
-Use selected beams from the simulated scan.
-
-For each particle:
-
-1. transform each selected beam endpoint into map/world space from the particle pose,
-2. query nearest-obstacle distance from the likelihood representation,
-3. compute hit likelihood,
-4. include random-measurement probability,
-5. combine beam contributions into a stable particle weight update.
-
-Recommended first-version terms:
-
-```text
-zHit
-zRand
-sigmaHit
-likelihoodMaxDistance
-maxBeams
-```
-
-Do not implement the full beam short/max mixture unless actually required by the selected likelihood-field formulation.
-
-## Numerical Stability
-
-Avoid multiplying many tiny floating-point values directly if it causes underflow.
-
-Log-likelihood accumulation is acceptable and preferred if it simplifies stability.
-
-After weight update:
-
-- all weights must be finite,
-- weights must be non-negative,
-- the normalized sum must be approximately 1.
-
-If all particle likelihoods collapse to zero/non-finite:
-
-- recover using a documented safe fallback,
-- do not propagate NaNs.
-
----
-
-# Phase 12 — Weight Normalization and ESS
-
-Implement reusable normalization.
+Implement tab interaction.
 
 Requirements:
 
 ```text
-sum(weights) ≈ 1
+click tab to activate
+active tab visibly distinct
+only active tab body displayed
+tab selection persists while application runs
+scroll state behaves predictably
 ```
 
-Handle:
+Preferred behavior:
 
-- normal weights
-- extremely small weights
-- zero total
-- non-finite values
+Each tab may keep its own scroll offset.
 
-Calculate effective sample size:
+If that substantially complicates the UI, a single reset-on-tab-switch scroll offset is acceptable, but behavior must be deterministic.
+
+Mouse wheel over Inspector scrolls Inspector.
+
+Mouse wheel over simulation viewport retains map zoom behavior.
+
+No event leakage between regions.
+
+---
+
+# 16. Phase 12 — Inspector Information Hierarchy
+
+Within each tab:
+
+Use visual hierarchy.
+
+Examples:
 
 ```text
-ESS = 1 / sum(w_i^2)
+primary state
+secondary metrics
+diagnostic details
 ```
 
-Use ESS as a diagnostic.
+Localization should not show dozens of values with equal visual importance.
 
-It may be used as a resampling trigger in addition to the configured resample interval if the architecture supports it cleanly.
-
-Do not introduce an arbitrary opaque threshold without exposing/documenting it.
-
----
-
-# Phase 13 — Low-Variance / Systematic Resampling
-
-Implement deterministic-seed low-variance or systematic resampling.
-
-Requirements:
-
-- samples according to normalized weights,
-- avoids O(N²) roulette-wheel behavior,
-- resets resampled weights consistently,
-- preserves configured minimum/maximum count constraints,
-- handles degenerate inputs safely.
-
-Add tests with highly skewed distributions.
-
----
-
-# Phase 14 — Adaptive KLD Particle Count
-
-Implement first-version KLD-sampling or equivalent standard AMCL adaptive particle-count control.
-
-Requirements:
-
-- particle count adapts between `minParticles` and `maxParticles`,
-- occupied particle bins are defined in x/y/theta,
-- bin resolution is explicit/configurable or clearly named constants,
-- `pfErr` controls approximation error,
-- `pfZ` controls confidence,
-- output particle count is deterministic for fixed RNG and input belief,
-- low-diversity/concentrated belief may use fewer particles,
-- broad/multimodal belief may require more particles,
-- never produce fewer than minimum or more than maximum.
-
-Do not fake adaptive sampling by choosing a random count.
-
-If implementing the standard KLD required-sample formula, isolate it into a testable helper.
-
-Add direct unit tests for required-sample behavior.
-
----
-
-# Phase 15 — Recovery Statistics and Random Injection
-
-Implement first-version AMCL recovery behavior.
-
-Track slow and fast running averages of observation quality using parameters analogous to:
-
-```text
-recoveryAlphaSlow
-recoveryAlphaFast
-```
-
-During resampling, derive a random-particle injection probability from the fast/slow relationship.
-
-Requirements:
-
-- healthy tracking produces little/no unnecessary random injection,
-- sudden severe mismatch can increase random-particle injection,
-- random particles are sampled only from valid free map space,
-- recovery behavior is disabled or inert when recovery alpha values are configured to zero,
-- values remain numerically stable.
-
-Do not teleport the estimate directly to ground truth.
-
-Recovery must emerge from particles.
-
----
-
-# Phase 16 — Pose Estimation
-
-Compute the localization estimate from particle belief.
-
-## Position
-
-Use weighted mean x/y.
-
-## Heading
-
-Use circular mean:
-
-```text
-sum(w * cos(theta))
-sum(w * sin(theta))
-atan2(...)
-```
-
-Do not use arithmetic mean of wrapped angles.
-
-## Covariance
-
-At minimum compute a 3x3 covariance over:
-
-```text
-x
-y
-yaw
-```
-
-with wrapped angular residuals.
-
-Requirements:
-
-- finite values
-- non-negative diagonal within numerical tolerance
-- covariance decreases as belief converges in deterministic test scenarios
-- estimate invalid state is explicit if belief is unavailable
-
----
-
-# Phase 17 — AMCL Coordinator / Localizer
-
-Create one clear high-level AMCL component that owns filter state and coordinates:
-
-```text
-initialize
-motion update
-sensor update
-normalize
-estimate
-resample
-recovery
-```
-
-Recommended external API shape conceptually:
-
-```text
-initializeLocal(...)
-initializeGlobal(...)
-
-update(odometryDelta, laserScan, mapLikelihood)
-
-getParticles()
-getEstimate()
-getStatistics()
-
-reset()
-```
-
-Exact names may follow existing style.
-
-Do not expose every internal helper through Simulator.
-
----
-
-# Phase 18 — Runtime Update Thresholds
-
-Avoid unnecessarily updating AMCL on every tiny motion if a clean threshold mechanism can be added.
-
-Support first-version thresholds analogous to:
-
-```text
-updateMinTranslation
-updateMinRotation
-resampleInterval
-```
-
-Requirements:
-
-- accumulated odometry motion is not lost,
-- sensor updates occur after sufficient movement or explicit initialization,
-- first valid scan after initialization may update immediately,
-- thresholds are deterministic and testable.
-
-Do not make localization depend on wall-clock timing.
-
----
-
-# Phase 19 — Simulator Integration
-
-Integrate localization into the existing runtime without breaking navigation.
-
-## Ground Truth
-
-`AMR` remains ground truth.
-
-## Localization State
-
-Simulator owns or coordinates a dedicated localization subsystem.
-
-## Initialization
-
-When Start Pose is configured:
-
-- AMR still synchronizes to Start as current behavior requires,
-- localization may initialize around Start with configurable uncertainty,
-- do not initialize every particle exactly on ground truth.
-
-Map load / Start replacement must rebuild or reset localization state as appropriate.
-
-## Runtime Ordering
-
-Choose and document a consistent order similar to:
-
-```text
-1. process input
-2. execute AMR motion
-3. collision acceptance / rollback
-4. derive accepted ground-truth pose change
-5. update noisy odometry
-6. generate laser scan
-7. update AMCL when thresholds permit
-8. update estimated pose/statistics
-9. render
-```
-
-Do not generate odometry from rejected collision motion.
-
-## Planning
-
-PathPlanner must continue using configured MapData Start/Goal semantics.
-
-Do not silently switch navigation to use AMCL estimate in this milestone.
-
-Localization is observational for now.
-
----
-
-# Phase 20 — Localization Reset Semantics
-
-Define consistent behavior for:
-
-- new Start Pose
-- Start heading change
-- Ctrl+R
-- map clear
-- map load
-- obstacle edit
-- world-boundary change if supported
-- global localization request if exposed
-
-Minimum rules:
-
-```text
-map geometry changes
-→ likelihood representation invalidated/rebuilt
-
-Start reset
-→ ground truth follows existing behavior
-→ odometry state reset
-→ AMCL locally reinitialized with uncertainty
-
-global initialization
-→ particle belief spread across free map
-→ ground truth unchanged
-```
-
-Do not allow stale distance fields after map editing.
-
----
-
-# Phase 21 — Visualization
-
-Render localization state clearly without contaminating inference code.
-
-## Particle Cloud
-
-Draw particles using lightweight primitives.
-
-Visual representation should communicate:
-
-- x/y position
-- optionally heading with tiny direction mark if inexpensive
-- optionally weight via opacity/size only if simple
-
-Rendering thousands of particles must remain responsive.
-
-Avoid creating a separate SFML shape object for every particle every frame if a vertex-based representation is simpler.
-
-## Estimated Pose
-
-Draw a distinct estimated-pose marker and heading.
-
-It must be visually distinguishable from:
-
-- ground-truth AMR
-- Start marker
-- Goal marker
-- particle cloud
-
-## LiDAR
-
-If straightforward and performance-safe:
-
-- draw a subset of current scan rays or endpoints,
-- make visualization optional or lightweight.
-
-LiDAR drawing is secondary to AMCL correctness.
-
----
-
-# Phase 22 — Inspector Localization Statistics
-
-Add a concise localization section.
-
-Display at least:
+Example hierarchy:
 
 ```text
 Localization
+State: Converged
+Support: Good
 
-State:
-Particles:
-ESS:
+Estimate
+X
+Y
+Yaw
 
-Estimated X:
-Estimated Y:
-Estimated Heading:
+Confidence
+Position σ
+Heading σ
+Dominant Weight
 
-Ground Truth X:
-Ground Truth Y:
-Ground Truth Heading:
+Particle Filter
+Particles
+ESS
+Clusters
 
-Position Error:
-Heading Error:
+Sensor
+Used beams
+Skipped beams
+Quality
 
-Odom X:
-Odom Y:
-Odom Heading:
+Recovery
+Probability
 ```
 
-If covariance is available compactly, show:
+Use spacing and headings consistently.
 
-```text
-Sigma X
-Sigma Y
-Sigma Heading
-```
-
-Use ground truth only for simulation diagnostics.
-
-Do not feed displayed error back into AMCL.
+Do not overdecorate.
 
 ---
 
-# Phase 23 — Convergence State
+# 17. Phase 13 — Inspector Formatting Helpers
 
-Provide a first-version convergence diagnostic.
+Remove repeated ad-hoc `ostringstream` and layout logic from `Simulator` where sensible.
 
-Define explicit thresholds/config for:
+A small structured UI model is allowed.
 
-- position uncertainty
-- heading uncertainty
-- minimum effective particle behavior if used
-
-Possible states:
+Example conceptual model:
 
 ```text
-Uninitialized
-Tracking
-Converged
-Recovering
+InspectorSection
+    title
+    lines
+    status/style
 ```
 
-Do not build a generalized FSM framework.
+or equivalent.
 
-These states are diagnostics derived from localization belief/recovery condition.
+Do not create a generic UI framework.
 
-Do not use actual ground-truth error as the primary convergence criterion.
-
-Ground truth may be reported separately for validation.
+The implementation should remain understandable C++/SFML code.
 
 ---
 
-# Phase 24 — Unit Test Expansion
+# 18. Phase 14 — Toolbar Review
 
-Add dedicated tests for each pure subsystem.
+Review current toolbar controls.
 
-Recommended new test executables or grouped suites:
+Do not remove existing editor functionality.
+
+Improve:
 
 ```text
-LidarSimulatorTests
-DistanceFieldTests
-OdometrySimulatorTests
-AmclMotionModelTests
-AmclSensorModelTests
-ParticleFilterTests
-AmclLocalizerTests
-LocalizationIntegrationTests
+spacing
+active-state visibility
+grouping
+readability
+resize behavior
 ```
 
-Combine suites when that keeps the Makefile simpler.
+If localization debug hotkeys are currently only discoverable through external knowledge, consider exposing concise hints in the Localization tab rather than adding many toolbar buttons.
 
-Do not create needless one-test executables.
-
-## Minimum Unit Coverage
-
-### LiDAR
-
-- straight hit
-- diagonal hit
-- nearest hit
-- world-boundary hit
-- max range
-- deterministic noise
-
-### Distance Field
-
-- obstacle cell distance
-- neighboring cell distance
-- empty area
-- clamped max distance
-- map rebuild
-
-### Odometry
-
-- zero motion
-- translation
-- rotation
-- mixed motion
-- deterministic noise
-- collision-rejected motion integration path if testable
-
-### Motion Model
-
-- no motion
-- forward propagation
-- turn propagation
-- normalized heading
-- seeded noise spread
-
-### Sensor Model
-
-- correct-pose scan scores better than clearly wrong pose in deterministic map
-- finite weights
-- range handling
-- beam subsampling
-
-### Weighting
-
-- normalization
-- zero-weight fallback
-- ESS
-- no NaNs
-
-### Resampling
-
-- skewed weights replicate high-weight hypotheses
-- systematic sampling bounds
-- normalized output
-
-### KLD
-
-- min bound
-- max bound
-- concentrated bins
-- broad bins
-- deterministic required count
-
-### Recovery
-
-- no mismatch injection near zero
-- severe mismatch increases injection
-- zero recovery alphas disable behavior
-
-### Estimate
-
-- weighted x/y
-- circular heading around +pi/-pi
-- covariance
-- finite output
+Avoid toolbar overcrowding.
 
 ---
 
-# Phase 25 — Deterministic End-to-End Convergence Test
+# 19. Phase 15 — Legend Review
 
-This is a hard Completion Gate requirement.
+Keep the legend, but improve placement and readability if needed.
 
-Build a deterministic map scenario with asymmetric geometry sufficient to localize uniquely.
-
-Example characteristics:
+It should clearly distinguish:
 
 ```text
-known world boundary
-multiple non-symmetric obstacle walls/blocks
-known ground-truth pose
-simulated scan
-initial particle uncertainty
-deterministic RNG
+Robot
+Start
+Goal
+Path
+Particles
+AMCL Estimate
+Odometry
+LiDAR
 ```
 
-Run repeated AMCL updates with realistic odometry + scans.
+Do not let the legend block meaningful map content.
 
-Required assertions:
-
-- estimate becomes valid,
-- particle distribution contracts,
-- position estimate approaches ground truth within a documented tolerance,
-- heading estimate approaches ground truth within a documented tolerance,
-- covariance decreases from initialization,
-- all intermediate weights remain finite,
-- particle count remains within configured bounds.
-
-Do not make the test pass by initializing particles almost exactly at truth.
-
-The initial uncertainty must be meaningful.
-
-Use tolerances appropriate to the existing 50-world-unit grid resolution.
+A compact overlay or UI-region placement is preferred.
 
 ---
 
-# Phase 26 — Motion + Localization Tracking Test
+# 20. Phase 16 — 360° LiDAR Contract
 
-Create a deterministic scenario where the robot moves through several updates.
+Change the default LiDAR to full-circle scanning.
 
-Required flow:
+Target:
 
 ```text
-initialize with uncertainty
-→ robot translates
-→ robot turns
-→ robot translates
-→ noisy odometry accumulates error
-→ LiDAR updates correct the belief
+fieldOfView = 2π
+```
+
+But do not implement it as a naive inclusive `[-π, +π]` sequence that duplicates the same physical ray.
+
+For a full-circle scan with `N` beams:
+
+```text
+beam i
+angle = angleMin + i * (2π / N)
+
+i = 0 ... N - 1
+```
+
+The first physical direction must not be duplicated as the final beam.
+
+Define explicit full-circle semantics in code.
+
+Tests must verify this.
+
+---
+
+# 21. Phase 17 — LaserScan Data Model Review
+
+Review the current `LaserScan` data structure.
+
+Preserve useful fields:
+
+```text
+ranges
+angleMin
+angleIncrement
+minRange
+maxRange
+sensor extrinsics
+```
+
+Prepare for future SLAM by considering scan timing metadata.
+
+Allowed additions include:
+
+```text
+scanTime
+timeIncrement
+```
+
+if the architecture audit finds them useful.
+
+Do not simulate rolling-scan motion distortion yet.
+
+Do not add timestamps unless they have a clear current or near-future semantic.
+
+Avoid speculative data-model bloat.
+
+---
+
+# 22. Phase 18 — Full-Circle Beam Generation Tests
+
+Add direct tests for:
+
+```text
+360° coverage
+beam count
+angle increment
+first beam angle
+last beam angle
+no duplicate first/last direction
+heading rotation
+sensor yaw offset
+sensor x/y offset
+```
+
+Test a small beam count such as:
+
+```text
+4 beams
+8 beams
+```
+
+to make expected angles obvious.
+
+Example four-beam geometry should represent four unique directions.
+
+---
+
+# 23. Phase 19 — 360° Ray-Casting Tests
+
+Validate full-circle LiDAR against known map geometry.
+
+Create deterministic tests covering:
+
+```text
+north obstacle
+south obstacle
+east obstacle
+west obstacle
+diagonal obstacle
+world boundary
+sensor near boundary
+sensor offset
+rotated sensor
+```
+
+All ranges must remain finite/valid according to existing scan semantics.
+
+---
+
+# 24. Phase 20 — AMCL 360° Compatibility
+
+The AMCL sensor model must continue working with 360° scans.
+
+Do not assume:
+
+```text
+front-facing scan
+270° field of view
+angleMin fixed to a particular value
 ```
 
 Verify:
 
-- odometry pose diverges measurably from ground truth under configured noise,
-- AMCL estimate remains or returns closer to ground truth than raw odometry after sufficient observations,
-- estimate does not directly equal ground truth at every step,
-- no NaNs,
-- no particle-count bound violation.
+```text
+beam selection
+beam skipping
+likelihood scoring
+max-range accounting
+invalid-range handling
+LiDAR extrinsics
+```
 
-This demonstrates that the sensor model is doing actual localization work.
+with the new full-circle scan.
+
+Existing localization convergence tests must remain valid.
+
+If deterministic parameter retuning is genuinely needed because 360° adds information, make the smallest justified changes.
+
+Do not weaken confidence gates.
 
 ---
 
-# Phase 27 — Kidnapped-Robot Recovery Test
+# 25. Phase 21 — LiDAR Visualization with 360° Data
 
-This is also a hard Completion Gate requirement unless investigation proves recovery cannot be implemented safely in the current milestone.
+LiDAR visualization must remain readable with a full-circle scan.
 
-Scenario:
+Remember:
 
 ```text
-AMCL converged near Pose A
-        ↓
-ground-truth AMR is teleported to distant valid Pose B
-        ↓
-do NOT reset particle filter
-        ↓
-odometry alone cannot explain the jump
-        ↓
-new LiDAR scans strongly disagree
-        ↓
-recovery mechanism increases random hypotheses
-        ↓
-belief eventually finds Pose B
-        ↓
-AMCL reconverges near Pose B
+sensor beam count
+!=
+rendered beam count
 ```
+
+Inference may use many beams.
+
+Rendering may display a subset.
 
 Requirements:
 
-- use deterministic seed,
-- no direct ground-truth injection into the filter,
-- test must detect a genuine recovery phase,
-- final position and heading errors must fall below documented thresholds,
-- complete within a bounded number of updates,
-- no infinite loop.
-
-If default recovery alpha values are zero, use explicit non-zero recovery config in this test.
-
-Do not change production defaults solely to force the test.
-
----
-
-# Phase 28 — Performance Sanity Check
-
-Measure basic runtime cost without building a benchmark framework.
-
-Test or manually inspect with:
-
 ```text
-minParticles around several hundred
-maxParticles around a few thousand
-selected laser beams around several dozen
+F2 LiDAR ray toggle preserved
+F3 hit point toggle preserved
+render subsampling independent of inference
+no duplicate visual ray at seam
+sensor extrinsics reflected visually
 ```
 
-Confirm:
-
-- interactive simulator remains usable,
-- no obviously quadratic particle-resampling loop,
-- no per-particle full-map rebuild,
-- likelihood field is reused,
-- particle rendering remains reasonable.
-
-Optimize only demonstrated hotspots.
-
-Do not perform speculative micro-optimization.
+Do not default to rendering hundreds of rays.
 
 ---
 
-# Phase 29 — Full Regression
+# 26. Phase 22 — Visual Polish Pass
 
-After all localization work:
+Perform a deliberate desktop visual pass.
+
+Review:
+
+```text
+background
+grid contrast
+obstacle contrast
+AMR contrast
+Start / Goal markers
+path
+particles
+estimate
+covariance
+odometry
+LiDAR hits
+selection outlines
+legend
+toolbar
+Inspector
+tabs
+```
+
+Fix small obvious issues such as:
+
+```text
+awkward spacing
+overlapping labels
+too-thick outlines
+hard-to-read low contrast
+unbalanced padding
+misaligned text
+markers visually overwhelming nearby content
+```
+
+Keep style understated.
+
+Do not spend large effort on cosmetic animation.
+
+---
+
+# 27. Phase 23 — Rendering Smoothness Audit
+
+Inspect whether visible roughness comes from:
+
+```text
+frame-rate-dependent animation
+unnecessary geometry rebuild
+integer rounding
+view transforms
+abrupt visual state changes
+path marker placement
+particle rendering
+```
+
+Fix clear presentation defects.
+
+Do not redesign the navigation controller under this task.
+
+If motion itself appears mechanically stop-turn-go, leave controller behavior unchanged and record it as a separate future navigation milestone.
+
+---
+
+# 28. Phase 24 — Input and UI Responsibility Audit
+
+After UI refactor, inspect event handling again.
+
+Ensure `Simulator` event routing remains understandable.
+
+Avoid one giant event function containing all Inspector/tab logic.
+
+Consider small UI-level handlers when coherent.
+
+Examples:
+
+```text
+handleInspectorClick()
+handleToolbarClick()
+handleLocalizationHotkeys()
+```
+
+Do not over-fragment trivial code.
+
+---
+
+# 29. Phase 25 — State Ownership Audit
+
+Verify after refactor that there is exactly one authoritative owner for important state.
+
+Examples:
+
+```text
+MapData
+    map state
+
+AMR
+    ground-truth runtime pose
+
+PathExecution
+    path execution progress
+
+AmclLocalizer
+    localization state
+
+Inspector/UI
+    active tab / UI presentation state
+```
+
+Do not let UI components own algorithm state.
+
+Do not let rendering mutate domain state.
+
+---
+
+# 30. Phase 26 — Include Dependency Audit
+
+Review headers.
+
+Reduce unnecessary transitive includes where practical.
+
+Use forward declarations where they materially reduce coupling and remain readable.
+
+Do not perform a massive include-cleanup campaign unrelated to the refactor.
+
+Check for headers that expose implementation-only SFML or localization dependencies unnecessarily.
+
+---
+
+# 31. Phase 27 — File Organization Review
+
+The project currently broadly separates:
+
+```text
+include/
+src/
+tests/
+```
+
+Do not automatically create many nested directories.
+
+First determine whether responsibility clarity is sufficiently improved through class boundaries alone.
+
+Only introduce subdirectories if they materially improve navigation.
+
+Potential categories could eventually be:
+
+```text
+navigation/
+localization/
+ui/
+simulation/
+```
+
+but this milestone must not reorganize the entire repository merely for aesthetics.
+
+A large path move creates merge/history noise.
+
+Prefer responsibility refactoring over directory churn.
+
+If no directory restructuring is necessary, explicitly keep the current top-level layout.
+
+---
+
+# 32. Phase 28 — Regression Tests for UI State Logic
+
+Rendering pixels do not need exhaustive tests.
+
+But non-rendering UI logic should be testable where practical.
+
+Test:
+
+```text
+default active Inspector tab
+tab switching
+tab persistence
+layer toggle state
+resize layout calculations where accessible
+global/local localization controls remain mapped correctly
+navigation mode state preserved
+```
+
+Do not build a GUI testing framework.
+
+---
+
+# 33. Phase 29 — Architecture Regression Tests
+
+Where extraction creates new pure logic, add tests.
+
+Examples:
+
+```text
+Inspector content selection
+covariance visualization math if moved
+LiDAR angle generation
+viewport layout calculations
+```
+
+Keep tests focused on logic, not SFML draw calls.
+
+---
+
+# 34. Phase 30 — Existing Navigation Regression
+
+Re-run and verify:
+
+```text
+Start placement
+Goal placement
+A* planning
+clearance-aware planning
+path execution
+Ctrl+R reset
+truth navigation
+localization-driven navigation
+confidence-loss stop
+```
+
+The architecture/UI refactor must not alter route semantics.
+
+---
+
+# 35. Phase 31 — Existing Localization Regression
+
+Re-run:
+
+```text
+local initialization
+global initialization
+tracking
+ambiguity
+convergence
+recovery
+kidnapped robot
+no-obstacle false-convergence protection
+beam skipping
+KLD
+sensor extrinsics
+configuration loading
+```
+
+360° LiDAR must not compromise these behaviors.
+
+---
+
+# 36. Phase 32 — Extended Localization Stress
+
+Run the extended stress suite.
+
+Existing reference:
+
+```text
+feature-rich local localization:
+10 / 10 seeds
+
+global localization:
+9 / 10 seeds within documented acquisition bound
+
+open map:
+0 / 10 false convergence
+
+kidnapped recovery:
+5 / 5 seeds
+```
+
+The refactor should not worsen false convergence.
+
+If 360° LiDAR improves global localization, record the new result.
+
+Do not change the test to force improvement.
+
+---
+
+# 37. Phase 33 — Performance Sanity
+
+Repeat representative localization benchmark.
+
+Previous approximate hotspots included sensor weighting.
+
+Check that refactoring and 360° raw scan generation have not introduced major regressions.
+
+Measure at least:
+
+```text
+LiDAR simulation
+sensor weighting
+clustering
+KLD resampling
+```
+
+Remember that raw scan beam count and AMCL selected beam count can differ.
+
+Do not optimize without evidence.
+
+---
+
+# 38. Phase 34 — Multi-Agent Architecture Review
+
+After production implementation, use Reviewer A.
+
+Review specifically:
+
+```text
+Simulator responsibility
+Environment responsibility
+UI ownership
+rendering ownership
+localization ownership
+sensor ownership
+future SLAM extension points
+```
+
+Ask:
+
+```text
+Would adding a SLAM subsystem now force major unrelated changes?
+```
+
+If yes, identify and resolve high-confidence architectural problems before finishing.
+
+Do not chase theoretical perfection.
+
+---
+
+# 39. Phase 35 — Multi-Agent UI Review
+
+Use Reviewer B.
+
+Review:
+
+```text
+Inspector tab grouping
+information duplication
+tab state
+layout geometry
+resize behavior
+visual hierarchy
+debug visibility
+LiDAR presentation
+```
+
+Look for:
+
+```text
+information still buried
+wrong category
+unnecessary clutter
+hard-coded coordinates
+overlapping UI
+```
+
+Resolve concrete issues.
+
+---
+
+# 40. Phase 36 — Multi-Agent Test / Regression Review
+
+Use Reviewer C.
+
+Audit:
+
+```text
+new 360° tests
+old AMCL tests
+navigation tests
+UI-state tests
+stress tests
+```
+
+Look for accidental test weakening.
+
+Verify no test depends on ground truth to make runtime inference pass.
+
+---
+
+# 41. Phase 37 — Full Clean Regression
+
+Run:
 
 ```text
 mingw32-make clean
@@ -1450,339 +1440,553 @@ mingw32-make all
 mingw32-make test
 ```
 
-Run all test executables directly.
+Then run every test executable directly.
 
-Existing baseline must remain:
+Then run:
 
 ```text
-79 existing tests PASS
-0 existing tests FAIL
+mingw32-make test-localization-stress
 ```
 
-All new localization tests must also pass.
+and:
 
-Do not weaken:
+```text
+mingw32-make localization-benchmark
+```
 
-- map tests
-- PathPlanner tests
-- PathExecution tests
-- SimulatorRuntime tests
+if these targets remain supported.
 
-Do not modify approved planning semantics to accommodate AMCL.
+Target:
+
+```text
+0 FAIL
+```
+
+Do not hide flaky failures.
 
 ---
 
-# Phase 30 — Desktop Runtime Sanity Check
+# 42. Phase 38 — Desktop Acceptance Attempt
 
-If the SFML executable can be launched:
+Launch the real SFML application.
 
-Perform a limited manual/automated sanity attempt.
-
-Verify where observable:
+Attempt to verify:
 
 ```text
-Start placed
-→ particle cloud initializes around uncertain Start
-→ estimated pose marker appears
-→ robot moves
-→ odometry differs slightly from truth
-→ particles update with scans
-→ estimate tracks robot
+1. Larger default window is comfortable.
+2. Resize behaves correctly.
+3. Inspector tabs are readable.
+4. Map tab contains map-related information.
+5. Navigation tab contains navigation-related information.
+6. Localization tab contains localization information.
+7. Tab switching works.
+8. Inspector scrolling works.
+9. Simulation zoom still works.
+10. Toolbar still works.
+11. Legend remains readable.
+12. LiDAR rays remain default-off or otherwise non-intrusive.
+13. F2 enables 360° LiDAR visualization.
+14. LiDAR rays visibly surround the robot through the full circle.
+15. No duplicate seam ray is obvious.
+16. Sensor offsets render correctly.
+17. AMCL particles remain readable.
+18. AMCL covariance remains readable.
+19. Global localization still works.
+20. Kidnap recovery still works.
+21. Truth navigation still works.
+22. Localization navigation still works.
 ```
 
-Also verify:
+If desktop automation cannot capture SFML:
 
-- map editing does not leave stale likelihood data,
-- reset reinitializes localization,
-- navigation still runs,
-- particle rendering does not hide the robot/path excessively.
-
-If Windows UI automation cannot attach to the SFML window, report this honestly.
-
-Do not claim visual verification without observing it.
+* launch application,
+* verify process remains alive,
+* report automation limitation,
+* do not claim visual verification.
 
 ---
 
-# Completion Gate
+# 43. Phase 39 — Human Acceptance Guidance
 
-The milestone is complete only if ALL applicable items below are satisfied.
+Because automated desktop capture may remain unreliable, ensure runtime controls are discoverable enough for a human acceptance pass.
+
+The final report should include a concise manual verification sequence.
+
+Do not add a large tutorial to the application.
+
+---
+
+# 44. Non-Goals
+
+Do not implement:
+
+```text
+SLAM
+occupancy-grid mapping from LiDAR
+loop closure
+scan matching
+ICP
+graph optimization
+pose graph
+EKF
+UKF
+IMU fusion
+3D LiDAR
+dynamic obstacle tracking
+ROS
+ROS 2
+TF tree
+plugin architecture
+GPU localization
+```
+
+Do not implement navigation upgrades:
+
+```text
+8-neighbor A*
+Theta*
+path smoothing
+spline trajectory
+continuous-curvature planning
+new motion controller
+dynamic replanning
+```
+
+Do not spend the milestone on:
+
+```text
+README rewrite
+documentation polishing
+directory aesthetics
+style-only code cleanup
+```
+
+---
+
+# 45. Pre-SLAM Architecture Requirement
+
+At the end of the milestone, adding a future SLAM subsystem should conceptually be possible without making it depend directly on `Simulator`.
+
+Desired future relationship:
+
+```text
+                Ground Truth AMR
+                  /          \
+                 ↓            ↓
+           Odometry        360° LiDAR
+              │               │
+              │               ├─────────→ AMCL
+              │               │
+              │               └─────────→ Future SLAM
+              │
+              └─────────────────────────→ Future SLAM
+```
+
+Future SLAM should be able to consume sensor abstractions rather than reading AMR ground truth.
+
+Do not implement the SLAM branch now.
+
+---
+
+# 46. Completion Gate
+
+This task is complete only when all major categories are addressed.
 
 ## Architecture
 
-- Ground truth, odometry, scan, particle belief, and estimate are separate.
-- AMCL does not read ground truth as its estimate.
-- MapData remains authoritative map state.
-- Simulator coordinates integration.
-- Probabilistic logic is not embedded in rendering.
+* responsibility audit completed,
+* `Simulator` responsibility reduced where justified,
+* UI logic has a coherent owner,
+* localization rendering has a coherent owner,
+* no new god object created,
+* state ownership remains explicit,
+* future SLAM can consume LiDAR/odometry without direct truth access.
 
-## Sensor Simulation
+## Inspector
 
-- LiDAR ray casting works.
-- measurement noise is deterministic when seeded.
-- map boundary and obstacles behave consistently.
+* category tabs implemented,
+* minimum Map / Navigation / Localization tabs,
+* information grouped logically,
+* active tab obvious,
+* scrolling predictable,
+* layout readable,
+* duplication reduced.
 
-## Map Model
+## Window / Visuals
 
-- likelihood/distance representation works.
-- map changes invalidate/rebuild derived localization map state.
+* larger and more comfortable default layout,
+* resize remains correct,
+* toolbar remains usable,
+* legend remains readable,
+* obvious visual roughness addressed,
+* debug overlays do not dominate normal use.
 
-## Motion
+## LiDAR
 
-- noisy odometry exists separately from truth.
-- particle differential motion model exists.
-- motion noise is configurable.
+* default full-circle 360° support,
+* correct beam angle semantics,
+* no duplicate first/last physical beam,
+* extrinsics preserved,
+* AMCL compatible,
+* rendering compatible,
+* dedicated tests added.
 
-## Particle Filter
+## Regression
 
-- initialization works.
-- normalization works.
-- ESS works.
-- resampling works.
-- adaptive KLD count works.
-- min/max count enforced.
-- recovery statistics work.
-- random recovery injection works.
-
-## Estimation
-
-- weighted pose estimate works.
-- circular heading mean works.
-- covariance works.
-- convergence diagnostics work.
-
-## Integration
-
-- runtime AMCL updates during accepted robot motion.
-- reset/start behavior is coherent.
-- navigation behavior remains intact.
-- particle and estimate visualization exist.
-- Inspector statistics exist.
-
-## Tests
-
-- all previous 79 tests pass.
-- all new unit tests pass.
-- deterministic convergence test passes.
-- deterministic moving-localization test passes.
-- kidnapped-robot recovery test passes.
-- 0 total test failures.
-
-If some requirement is genuinely blocked:
-
-- identify the exact requirement,
-- state the blocker,
-- preserve all completed safe work,
-- do not silently declare the entire milestone complete.
+* all normal tests pass,
+* localization stress passes,
+* no false-convergence regression,
+* navigation behavior preserved,
+* benchmark shows no unexplained major regression.
 
 ---
 
-# Implementation Discipline
-
-Prefer simple, explicit C++.
-
-Avoid:
-
-- template-heavy generic frameworks,
-- dependency injection frameworks,
-- unnecessary inheritance,
-- ROS-style plugin architecture,
-- premature threading,
-- hidden global RNG,
-- singleton localization state,
-- duplicated map representations with unclear ownership.
-
-New dependencies are not allowed unless absolutely necessary.
-
-Prefer the C++ standard library and existing SFML dependency.
-
----
-
-# Numerical Discipline
-
-All probabilistic code must defend against:
-
-- NaN
-- infinity
-- zero total weight
-- divide-by-zero
-- invalid standard deviation
-- invalid particle count
-- angle wrap errors
-- log(0)
-- underflow from repeated likelihood multiplication
-
-Use clearly named epsilon/floor constants where required.
-
-Do not hide invalid state by silently producing arbitrary estimates.
-
----
-
-# Multi-Agent Execution Rules
-
-This is a long-running task.
-
-Use up to 3 concurrent subagents.
-
-Recommended initial batch:
-
-```text
-Main Sol Agent
-├── Explorer A: particle filter / KLD / recovery architecture
-├── Explorer B: LiDAR / likelihood-field architecture
-└── Explorer C: odometry / Simulator integration
-```
-
-After the first batch completes:
-
-- the main agent synthesizes architecture,
-- production integration remains owned by the main agent,
-- completed agents may be reused for review if the tool supports it,
-- do not repeatedly spawn new agents if capacity is unavailable.
-
-If capacity allows after major implementation:
-
-```text
-Reviewer A
-→ mathematical/probabilistic correctness
-
-Reviewer B
-→ integration/regression risks
-
-Reviewer C
-→ deterministic test completeness
-```
-
-Reviewers should report findings.
-
-The main agent owns final fixes.
-
-If `agent thread limit reached` occurs:
-
-- continue serially,
-- do not repeatedly retry spawn,
-- do not abandon the milestone.
-
----
-
-# Long-Running Task Rules
-
-This task explicitly authorizes substantial implementation.
-
-Do not stop after:
-
-- creating data types,
-- implementing LiDAR only,
-- implementing particles only,
-- obtaining a compiling build,
-- passing only unit tests,
-- showing a particle cloud,
-- obtaining one convergence demo.
-
-Continue through:
-
-```text
-baseline
-→ architecture
-→ sensor simulation
-→ odometry
-→ particle filter
-→ likelihood model
-→ KLD
-→ recovery
-→ estimation
-→ integration
-→ visualization
-→ deterministic unit tests
-→ convergence test
-→ moving localization test
-→ kidnapped recovery test
-→ full regression
-→ STATUS
-→ STOP
-```
-
-Do not expand into unrelated navigation features.
-
-Do not optimize for consuming tokens.
-
-Optimize for completing this full milestone correctly.
-
----
-
-# STATUS Update
+# 47. STATUS Update
 
 Update only:
 
-`docs/agent/STATUS.md`
+```text
+docs/agent/STATUS.md
+```
 
-Replace stale milestone content with the actual repository state.
+Record:
 
-Record concisely:
+```text
+current milestone
+architecture ownership decisions
+Simulator responsibility changes
+new UI components
+Inspector tab structure
+window/layout changes
+LiDAR 360° semantics
+LaserScan data-model changes
+AMCL compatibility
+test totals
+stress results
+performance results
+desktop verification status
+known limitations
+next smallest meaningful milestone
+```
 
-- current AMCL milestone result
-- new localization modules
-- ground truth / odometry / estimate ownership
-- LiDAR model
-- likelihood model
-- motion model
-- particle initialization
-- resampling/KLD behavior
-- recovery behavior
-- estimate/covariance behavior
-- Simulator integration
-- visualization
-- test totals
-- deterministic convergence result
-- kidnapped recovery result
-- runtime verification status
-- known limitations
-- next smallest meaningful milestone
+Do not write a chronological development diary.
 
-Do not turn STATUS into a chronological development log.
+Do not update:
 
-Do not update unrelated documentation.
+```text
+README.md
+Document.md
+AGENTS.md
+docs/specs/README.md
+```
+
+unless explicitly required by a blocking repository rule.
 
 ---
 
-# Git Ownership
+# 48. Git Ownership
 
 For this orchestrated run:
 
-- Do NOT run `git add`
-- Do NOT run `git commit`
-- Do NOT run `git push`
+```text
+DO NOT git add
+DO NOT git commit
+DO NOT git push
+```
 
-The external orchestrator owns Git finalization after Codex exits successfully.
+The external orchestrator owns repository finalization.
 
-This task-specific rule overrides repository instructions that assign Git finalization to Codex.
-
-Before returning control, ensure all intended production/test/STATUS changes remain in the working tree.
+Leave all intended production, test, and STATUS changes in the working tree when finished.
 
 ---
 
-# Final Report
+# 49. Long-Running Task Authorization
+
+This task intentionally exceeds the repository's normal small-task size.
+
+Interpret small-task guidance as:
+
+```text
+make each internal modification coherent and testable
+```
+
+not:
+
+```text
+stop after the first extraction
+```
+
+Do not stop after:
+
+```text
+architecture audit
+Simulator extraction
+Inspector tabs
+window resize
+360° LiDAR
+first green test
+```
+
+Continue through the Completion Gate unless a genuine technical blocker exists.
+
+---
+
+# 50. Required Work Loop
+
+Use this loop throughout the task:
+
+```text
+inspect
+→ reason about responsibility
+→ implement one coherent structural change
+→ targeted build/test
+→ continue
+→ integration test
+→ review architecture again
+→ full regression
+```
+
+Do not perform a giant blind mechanical refactor.
+
+---
+
+# 51. Final Report
 
 Before STOP, report:
 
-1. Production files added/modified
-2. Test files added/modified
-3. AMCL architecture implemented
-4. LiDAR simulation behavior
-5. Odometry simulation behavior
-6. Motion model behavior
-7. Likelihood-field behavior
-8. Particle initialization behavior
-9. Resampling and KLD behavior
-10. Recovery behavior
-11. Pose estimate/covariance behavior
-12. Simulator/rendering integration
-13. Convergence test result
-14. Moving-localization test result
-15. Kidnapped-robot recovery test result
-16. Full regression commands and result
-17. Total PASS / FAIL count
-18. Remaining limitations or blockers
+1. Baseline verification result
+2. Architecture problems identified
+3. Final responsibility map
+4. Simulator responsibilities removed or retained
+5. New classes/files added
+6. Existing classes/files significantly changed
+7. Inspector architecture
+8. Tab organization
+9. Window/layout changes
+10. Toolbar changes
+11. Legend changes
+12. Localization rendering ownership
+13. LiDAR previous FOV
+14. New 360° semantics
+15. Beam-angle formula / seam handling
+16. LaserScan data-model changes
+17. SLAM-preparation decisions
+18. AMCL compatibility result
+19. Navigation regression result
+20. Localization regression result
+21. Stress-test result
+22. Performance result
+23. Desktop runtime verification result
+24. Reviewer findings resolved
+25. Remaining architectural limitations
+26. Remaining visual limitations
+27. Recommended next milestone
+28. Exact PASS / FAIL totals
 
-Do not produce a tutorial.
+Then:
 
-After the final report, STOP.
+```text
+STOP
+```
+# Agent Reading / Task Routing
+
+This plan is intentionally large.
+
+Do NOT give every subagent the entire plan as its working scope.
+
+The Main Agent owns the full milestone and may read the entire NEXT_PLAN.md.
+
+Subagents should read only:
+1. the Shared Context sections,
+2. their explicitly assigned phase ranges,
+3. the source files relevant to their audit.
+
+When spawning a subagent, explicitly tell it which numbered sections of NEXT_PLAN.md to read.
+
+Do not ask subagents to summarize or implement unrelated phases.
+
+## Shared Context — all agents
+
+Every subagent may read:
+
+- Section 0 — Mission
+- Section 1 — Current Baseline
+- Section 2 — User-Observed Runtime Issues
+- Section 3 — High-Level Strategy
+- Section 44 — Non-Goals
+- Section 45 — Pre-SLAM Architecture Requirement
+- Section 46 — Completion Gate
+
+They do NOT need to read the remaining sections unless assigned below.
+
+---
+
+## Explorer A — Architecture / Responsibility Audit
+
+Read NEXT_PLAN.md:
+
+- Section 6 — Architecture Audit
+- Section 9 — Main Architecture Decision
+- Section 10 — Refactor Safety Rules
+- Section 11 — Simulator Responsibility Reduction
+- Section 12 — Localization Rendering Responsibility
+- Section 24 — Input and UI Responsibility Audit
+- Section 25 — State Ownership Audit
+- Section 26 — Include Dependency Audit
+- Section 27 — File Organization Review
+- Section 34 — Multi-Agent Architecture Review
+
+Primary source files:
+
+- include/Simulator.hpp
+- src/Simulator.cpp
+- include/Environment.hpp
+- src/Environment.cpp
+- include/AMR.hpp
+- src/AMR.cpp
+- include/MapData.hpp
+- src/MapData.cpp
+- include/PathPlanner.hpp
+- src/PathPlanner.cpp
+- include/PathExecution.hpp
+- src/PathExecution.cpp
+- include/AmclLocalizer.hpp
+- src/AmclLocalizer.cpp
+- include/ParticleFilter.hpp
+- src/ParticleFilter.cpp
+
+Task:
+
+Audit responsibility, ownership, coupling, state flow, and likely extraction boundaries.
+
+Do not edit production code.
+
+Return findings and a proposed responsibility map to the Main Agent.
+
+---
+
+## Explorer B — UI / Inspector / Rendering Audit
+
+Read NEXT_PLAN.md:
+
+- Section 7 — UI / Rendering Audit
+- Section 12 — Localization Rendering Responsibility
+- Section 13 — UI Layout Model
+- Section 14 — Inspector Tab Architecture
+- Section 15 — Inspector Interaction
+- Section 16 — Inspector Information Hierarchy
+- Section 17 — Inspector Formatting Helpers
+- Section 18 — Toolbar Review
+- Section 19 — Legend Review
+- Section 22 — Visual Polish Pass
+- Section 23 — Rendering Smoothness Audit
+- Section 28 — Regression Tests for UI State Logic
+- Section 35 — Multi-Agent UI Review
+- Section 42 — Desktop Acceptance Attempt
+
+Primary source files:
+
+- include/Simulator.hpp
+- src/Simulator.cpp
+- include/LocalizationVisualization.hpp
+- src/LocalizationVisualization.cpp
+- include/Environment.hpp
+- src/Environment.cpp
+
+Task:
+
+Audit UI ownership, Inspector organization, toolbar, legend, localization rendering, layout, resize behavior, and visual hierarchy.
+
+Do not edit production code.
+
+Return a proposed UI responsibility map and Inspector tab design to the Main Agent.
+
+---
+
+## Explorer C — LiDAR / Localization / Future SLAM Audit
+
+Read NEXT_PLAN.md:
+
+- Section 8 — LiDAR / Future SLAM Audit
+- Section 16 — 360° LiDAR Contract
+- Section 17 — LaserScan Data Model Review
+- Section 18 — Full-Circle Beam Generation Tests
+- Section 19 — 360° Ray-Casting Tests
+- Section 20 — AMCL 360° Compatibility
+- Section 21 — LiDAR Visualization with 360° Data
+- Section 31 — Existing Localization Regression
+- Section 32 — Extended Localization Stress
+- Section 33 — Performance Sanity
+- Section 40 — Multi-Agent Test / Regression Review
+- Section 45 — Pre-SLAM Architecture Requirement
+
+Primary source files:
+
+- include/LidarSimulator.hpp
+- src/LidarSimulator.cpp
+- include/LocalizationTypes.hpp
+- include/AmclLocalizer.hpp
+- src/AmclLocalizer.cpp
+- include/ParticleFilter.hpp
+- src/ParticleFilter.cpp
+- include/LocalizationVisualization.hpp
+- src/LocalizationVisualization.cpp
+- include/LocalizationConfig.hpp
+- src/LocalizationConfig.cpp
+
+Relevant tests:
+
+- tests/LocalizationSensorTests.cpp
+- tests/ParticleFilterTests.cpp
+- tests/LocalizationIntegrationTests.cpp
+- tests/LocalizationStressTests.cpp
+- tests/LocalizationConfigTests.cpp
+
+Task:
+
+Audit full-circle LiDAR semantics, beam indexing, scan representation, extrinsics, AMCL assumptions, visualization assumptions, and future SLAM sensor boundaries.
+
+Do not implement SLAM.
+
+Do not edit production code.
+
+Return findings and a recommended 360° scan contract to the Main Agent.
+
+---
+
+# Main Agent Reading Strategy
+
+The Main Agent should NOT begin by deeply reading every source file.
+
+First read:
+
+- Sections 0–5
+- Sections 9–12
+- Sections 44–51
+
+Then spawn Explorers A/B/C.
+
+While explorers work, inspect the current high-level class interfaces and baseline tests.
+
+After explorer reports return:
+
+1. verify their important claims directly against source,
+2. determine the final architecture,
+3. continue implementation phases in dependency order.
+
+Recommended implementation order:
+
+Architecture refactor
+→ UI ownership extraction
+→ Inspector tabs/layout
+→ localization visualization extraction
+→ 360° LiDAR semantics
+→ AMCL compatibility
+→ visual polish
+→ tests/stress
+→ reviewer pass
+→ full regression
+
+The Main Agent remains the only production integration owner.
+
+Subagents must not independently modify overlapping production files.
